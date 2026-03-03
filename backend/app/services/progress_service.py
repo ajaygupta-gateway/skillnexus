@@ -1,0 +1,335 @@
+"""
+Progress Service — node status updates, XP awards, and assignment management.
+"""
+
+import uuid
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.exceptions import (
+    BadRequestException,
+    ConflictException,
+    NotFoundException,
+    NotAssignedException,
+    QuizRequiredException,
+)
+from app.models.models import (
+    NodeStatus,
+    PointEventType,
+    User,
+    UserRoadmapAssignment,
+)
+from app.repositories.progress_repository import ProgressRepository
+from app.repositories.roadmap_repository import RoadmapRepository
+from app.repositories.user_repository import UserRepository
+from app.schemas.progress import (
+    AssignmentCreateRequest,
+    AssignmentResponse,
+    AssignmentUpdateRequest,
+    NodeProgressResponse,
+    RoadmapProgressSummary,
+)
+
+
+class ProgressService:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+        self.repo = ProgressRepository(db)
+        self.roadmap_repo = RoadmapRepository(db)
+        self.user_repo = UserRepository(db)
+
+    # ── Assignments ────────────────────────────────────────────────────────────
+    async def create_assignment(
+        self,
+        data: AssignmentCreateRequest,
+        assigned_by: User,
+    ) -> list[AssignmentResponse]:
+        # Validate roadmap exists
+        roadmap = await self.roadmap_repo.get_by_id(data.roadmap_id)
+        if not roadmap:
+            raise NotFoundException("Roadmap")
+
+        created = []
+        for user_id in data.user_ids:
+            # Check if assignment already exists
+            existing = await self.repo.get_assignment(user_id, data.roadmap_id)
+            if existing:
+                raise ConflictException(
+                    f"User {user_id} is already assigned to this roadmap"
+                )
+
+            assignment = await self.repo.create_assignment(
+                user_id=user_id,
+                roadmap_id=data.roadmap_id,
+                assigned_by=assigned_by.id,
+                strict_mode=data.strict_mode,
+            )
+            created.append(
+                AssignmentResponse(
+                    id=assignment.id,
+                    user_id=assignment.user_id,
+                    roadmap_id=assignment.roadmap_id,
+                    assigned_by=assignment.assigned_by,
+                    status=assignment.status,
+                    completion_percentage=assignment.completion_percentage,
+                    strict_mode=assignment.strict_mode,
+                    assigned_at=assignment.assigned_at,
+                    last_active_at=assignment.last_active_at,
+                    roadmap_title=roadmap.title,
+                )
+            )
+        return created
+
+    async def enroll_roadmap(
+        self,
+        user_id: uuid.UUID,
+        roadmap_id: uuid.UUID,
+    ) -> AssignmentResponse:
+        """Self-enroll to a roadmap. First node automatically set to in_progress (unlocked)."""
+        roadmap = await self.roadmap_repo.get_by_id(roadmap_id)
+        if not roadmap:
+            raise NotFoundException("Roadmap")
+
+        existing = await self.repo.get_assignment(user_id, roadmap_id)
+        if existing:
+            # Already assigned, return as is
+            return AssignmentResponse(
+                id=existing.id, user_id=existing.user_id, roadmap_id=existing.roadmap_id,
+                assigned_by=existing.assigned_by, status=existing.status,
+                completion_percentage=existing.completion_percentage, strict_mode=existing.strict_mode,
+                assigned_at=existing.assigned_at, last_active_at=existing.last_active_at,
+                roadmap_title=roadmap.title,
+            )
+
+        assignment = await self.repo.create_assignment(
+            user_id=user_id,
+            roadmap_id=roadmap_id,
+            assigned_by=user_id,
+            strict_mode=False,
+        )
+        
+        # Initialize first node as in_progress (unlocked)
+        flat_nodes = await self.roadmap_repo.get_full_tree(roadmap_id)
+        if flat_nodes:
+            # Get first root node (no parent), sorted by order_index
+            root_nodes = sorted(
+                [n for n in flat_nodes if n.get('parent_id') is None],
+                key=lambda n: n.get('order_index', 0)
+            )
+            if root_nodes:
+                first_node = root_nodes[0]
+                # ID from get_full_tree is a string, convert to UUID
+                first_node_id = uuid.UUID(first_node['id']) if isinstance(first_node['id'], str) else first_node['id']
+                await self.repo.upsert_node_progress(
+                    user_id=user_id,
+                    node_id=first_node_id,
+                    roadmap_id=roadmap_id,
+                    status=NodeStatus.in_progress,
+                )
+        
+        return AssignmentResponse(
+            id=assignment.id, user_id=assignment.user_id, roadmap_id=assignment.roadmap_id,
+            assigned_by=assignment.assigned_by, status=assignment.status,
+            completion_percentage=assignment.completion_percentage, strict_mode=assignment.strict_mode,
+            assigned_at=assignment.assigned_at, last_active_at=assignment.last_active_at,
+            roadmap_title=roadmap.title,
+        )
+
+    async def get_assignments(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        roadmap_id: uuid.UUID | None = None,
+        user_id: uuid.UUID | None = None,
+    ) -> dict:
+        skip = (page - 1) * page_size
+        assignments, total = await self.repo.get_all_assignments(
+            skip=skip, limit=page_size, roadmap_id=roadmap_id, user_id=user_id
+        )
+        pages = (total + page_size - 1) // page_size
+
+        items = [
+            AssignmentResponse(
+                id=a.id,
+                user_id=a.user_id,
+                roadmap_id=a.roadmap_id,
+                assigned_by=a.assigned_by,
+                status=a.status,
+                completion_percentage=a.completion_percentage,
+                strict_mode=a.strict_mode,
+                assigned_at=a.assigned_at,
+                last_active_at=a.last_active_at,
+            )
+            for a in assignments
+        ]
+        return {"items": items, "total": total, "page": page, "page_size": page_size, "pages": pages}
+
+    async def update_assignment(
+        self, assignment_id: uuid.UUID, data: AssignmentUpdateRequest
+    ) -> AssignmentResponse:
+        assignment = await self.repo.get_assignment_by_id(assignment_id)
+        if not assignment:
+            raise NotFoundException("Assignment")
+
+        updates = data.model_dump(exclude_none=True)
+        assignment = await self.repo.update_assignment(assignment, **updates)
+        return AssignmentResponse(
+            id=assignment.id,
+            user_id=assignment.user_id,
+            roadmap_id=assignment.roadmap_id,
+            assigned_by=assignment.assigned_by,
+            status=assignment.status,
+            completion_percentage=assignment.completion_percentage,
+            strict_mode=assignment.strict_mode,
+            assigned_at=assignment.assigned_at,
+            last_active_at=assignment.last_active_at,
+        )
+
+    async def delete_assignment(self, assignment_id: uuid.UUID) -> None:
+        assignment = await self.repo.get_assignment_by_id(assignment_id)
+        if not assignment:
+            raise NotFoundException("Assignment")
+        await self.repo.delete_assignment(assignment)
+
+    # ── Node Progress ──────────────────────────────────────────────────────────
+    async def get_roadmap_progress(
+        self, user_id: uuid.UUID, roadmap_id: uuid.UUID
+    ) -> RoadmapProgressSummary:
+        roadmap = await self.roadmap_repo.get_by_id(roadmap_id)
+        if not roadmap:
+            raise NotFoundException("Roadmap")
+
+        # Verify the user is actually enrolled / assigned to this roadmap
+        assignment = await self.repo.get_assignment(user_id, roadmap_id)
+        if not assignment:
+            raise NotAssignedException()
+
+        progress_records = await self.repo.get_roadmap_progress(user_id, roadmap_id)
+        total_nodes = await self.roadmap_repo.count_nodes(roadmap_id)
+
+        done = sum(1 for p in progress_records if p.status == NodeStatus.done)
+        in_progress = sum(
+            1 for p in progress_records if p.status == NodeStatus.in_progress
+        )
+        percentage = round((done / total_nodes * 100), 2) if total_nodes > 0 else 0.0
+
+        node_statuses = [
+            NodeProgressResponse(
+                id=p.id,
+                user_id=p.user_id,
+                node_id=p.node_id,
+                roadmap_id=p.roadmap_id,
+                status=p.status,
+                quiz_passed=p.quiz_passed,
+                completed_at=p.completed_at,
+                updated_at=p.updated_at,
+            )
+            for p in progress_records
+        ]
+
+        return RoadmapProgressSummary(
+            roadmap_id=roadmap_id,
+            roadmap_title=roadmap.title,
+            total_nodes=total_nodes,
+            completed_nodes=done,
+            in_progress_nodes=in_progress,
+            completion_percentage=percentage,
+            node_statuses=node_statuses,
+        )
+
+    async def update_node_progress(
+        self,
+        user_id: uuid.UUID,
+        roadmap_id: uuid.UUID,
+        node_id: uuid.UUID,
+        new_status: str,
+    ) -> NodeProgressResponse:
+        # Security: must be assigned to this roadmap
+        assignment = await self.repo.get_assignment(user_id, roadmap_id)
+        if not assignment:
+            raise NotAssignedException()
+
+        # Validate the node belongs to this roadmap
+        node = await self.roadmap_repo.get_node_by_id(node_id)
+        if not node or node.roadmap_id != roadmap_id:
+            raise NotFoundException("Node")
+
+        status = NodeStatus(new_status)
+        
+        # Check if user is allowed to move to this node (only when trying to unlock from locked state)
+        existing_progress = await self.repo.get_node_progress(user_id, node_id)
+        is_currently_locked = not existing_progress or existing_progress.status == NodeStatus.locked
+        
+        if status == NodeStatus.in_progress and is_currently_locked:
+            # User is trying to unlock a locked node
+            if node.parent_id:
+                # This node has a parent, check if parent is done and quiz passed
+                parent_progress = await self.repo.get_node_progress(user_id, node.parent_id)
+                if not parent_progress or parent_progress.status != NodeStatus.done:
+                    raise BadRequestException(
+                        "You must complete the previous node before unlocking this one"
+                    )
+                if not parent_progress.quiz_passed:
+                    raise QuizRequiredException()
+            # For root nodes, always allow unlocking if enrolled
+
+        # Strict Mode: cannot mark done without quiz_passed (only if transitioning to done)
+        if status == NodeStatus.done and assignment.strict_mode:
+            if not existing_progress or not existing_progress.quiz_passed:
+                raise QuizRequiredException()
+
+        is_newly_done = False
+        if not existing_progress or existing_progress.status != NodeStatus.done:
+            is_newly_done = status == NodeStatus.done
+
+        progress = await self.repo.upsert_node_progress(
+            user_id=user_id,
+            node_id=node_id,
+            roadmap_id=roadmap_id,
+            status=status,
+        )
+
+        # Award XP only on first completion
+        if is_newly_done:
+            from app.core.config import settings
+            await self.user_repo.add_xp(
+                user_id=user_id,
+                amount=settings.XP_NODE_COMPLETE,
+                event_type=PointEventType.node_complete,
+                description=f"Completed node: {node.title}",
+                reference_id=str(node_id),
+            )
+            user = await self.user_repo.get_by_id(user_id)
+            if user:
+                await self.user_repo.update_level(user)
+
+        # Recalculate assignment completion percentage
+        await self.repo.recalculate_completion(user_id, roadmap_id)
+
+        return NodeProgressResponse(
+            id=progress.id,
+            user_id=progress.user_id,
+            node_id=progress.node_id,
+            roadmap_id=progress.roadmap_id,
+            status=progress.status,
+            quiz_passed=progress.quiz_passed,
+            completed_at=progress.completed_at,
+            updated_at=progress.updated_at,
+        )
+
+    async def get_node_progress(
+        self, user_id: uuid.UUID, roadmap_id: uuid.UUID, node_id: uuid.UUID
+    ) -> NodeProgressResponse | None:
+        progress = await self.repo.get_node_progress(user_id, node_id)
+        if not progress:
+            return None
+        return NodeProgressResponse(
+            id=progress.id,
+            user_id=progress.user_id,
+            node_id=progress.node_id,
+            roadmap_id=progress.roadmap_id,
+            status=progress.status,
+            quiz_passed=progress.quiz_passed,
+            completed_at=progress.completed_at,
+            updated_at=progress.updated_at,
+        )

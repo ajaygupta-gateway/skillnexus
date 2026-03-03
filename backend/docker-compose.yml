@@ -1,0 +1,126 @@
+version: "3.9"
+
+services:
+  # ── PostgreSQL Database ─────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: skillnexus-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-skillnexus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-skillnexus_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-skillnexus_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-skillnexus} -d ${POSTGRES_DB:-skillnexus_db}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - skillnexus-network
+
+  # ── Redis Cache / Token Store ───────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: skillnexus-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - skillnexus-network
+
+  # ── FastAPI Application ─────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: skillnexus-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Override localhost URLs to use Docker service names
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-skillnexus}:${POSTGRES_PASSWORD:-skillnexus_secret}@postgres:5432/${POSTGRES_DB:-skillnexus_db}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./uploads:/app/uploads
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - skillnexus-network
+
+  # ── Alembic Migration Runner (one-shot) ─────────────────────────────────────
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: skillnexus-migrate
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-skillnexus}:${POSTGRES_PASSWORD:-skillnexus_secret}@postgres:5432/${POSTGRES_DB:-skillnexus_db}
+    command: [ "uv", "run", "alembic", "upgrade", "head" ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - skillnexus-network
+    profiles:
+      - migrate # Only runs with: docker compose --profile migrate up migrate
+
+  # ── pgAdmin (DB browser) ────────────────────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: skillnexus-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@skillnexus.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - skillnexus-network
+    profiles:
+      - tools
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  skillnexus-network:
+    driver: bridge
