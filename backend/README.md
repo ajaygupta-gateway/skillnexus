@@ -16,6 +16,7 @@ roadmap_nodes
 ├── roadmap_id (FK → roadmaps)
 ├── parent_id (FK → roadmap_nodes, nullable = root node)  ← Self-referential
 ├── title
+├── order_index     ← used for linear progression ordering
 ├── ...
 ```
 
@@ -47,7 +48,22 @@ The flat result is assembled into a nested tree in Python in O(n) using a hash m
 
 ---
 
-### 2. Gamification: Event-Based XP Ledger
+### 2. Progressive Node Unlocking
+
+Nodes unlock **sequentially by `order_index`**:
+
+| Rule | Detail |
+|---|---|
+| Enrollment | First root node (lowest `order_index`) is automatically set to `in_progress` |
+| Unlock next | Previous node must be `done` **and** `quiz_passed = true` |
+| Root nodes | Always unlockable for enrolled users without parent checks |
+| Strict mode | `done` status requires `quiz_passed = true` (admin-controlled per assignment) |
+
+The `ProgressService.update_node_progress` enforces these rules server-side — the frontend cannot bypass them.
+
+---
+
+### 3. Gamification: Event-Based XP Ledger
 
 ```
 point_transactions (append-only)
@@ -72,7 +88,7 @@ users
 
 ---
 
-### 3. AI Prompt Strategy
+### 4. AI Prompt Strategy
 
 System prompt per node:
 ```
@@ -81,11 +97,18 @@ in the '{roadmap_title}' learning roadmap. Keep answers concise and practical.
 ```
 
 Chat history stored per-node in DB. Last 20 messages loaded as LangChain message objects per call.
-Quiz answers stored server-side only (never exposed to client).
+
+**Quiz security**: Correct answers are stored as a `system` role message (`__QUIZ_ANSWERS__:{json}`) in the chat session — never included in responses sent to the client. Grading is done entirely server-side in `ChatService.submit_quiz`.
+
+**Quiz answer format** (`QuizAnswerSubmission`):
+```json
+{ "answers": { "1": "A", "2": "C", "3": "B" } }
+```
+Keys are `question_number` (string), values are option keys (`"A"` / `"B"` / `"C"` / `"D"`).
 
 ---
 
-### 4. Auth: Stateless Access + Stateful Refresh
+### 5. Auth: Stateless Access + Stateful Refresh
 
 | Token | Storage | Lifetime | Revocable |
 |---|---|---|---|
@@ -98,7 +121,7 @@ Quiz answers stored server-side only (never exposed to client).
 
 ```bash
 cp .env.example .env
-# Add your GEMINI_API_KEY
+# Fill in GROQ_API_KEY, DATABASE_URL, SECRET_KEY, etc.
 
 docker compose up -d
 docker compose run --rm migrate
@@ -130,9 +153,11 @@ uv run pytest --cov=app --cov-report=html -v
 |---|---|
 | **Auth** | POST /auth/register, /auth/login, /auth/refresh, /auth/logout |
 | **Users** | GET /users/me, GET /users/leaderboard |
-| **Roadmaps** | POST /roadmaps, GET /roadmaps/{id}, POST /roadmaps/generate (AI) |
-| **Progress** | POST /progress/roadmaps/{id}/nodes/{nid} |
-| **Chat** | POST /chat/sessions/{node_id}/messages, /quiz, /quiz/submit |
+| **Roadmaps** | GET /roadmaps, POST /roadmaps, GET /roadmaps/{id}, POST /roadmaps/generate (AI) |
+| **Progress** | POST /progress/roadmaps/{id}/enroll |
+| **Progress** | GET /progress/roadmaps/{id}, POST /progress/roadmaps/{id}/nodes/{nid} |
+| **Chat** | POST /chat/sessions/{node_id}/messages |
+| **Quiz** | POST /chat/sessions/{node_id}/quiz, POST /chat/sessions/{node_id}/quiz/submit |
 | **Admin** | POST /admin/assignments, GET /admin/analytics/dashboard |
 | **Resume** | POST /resume/upload |
 
@@ -152,6 +177,7 @@ backend/
 │   └── repositories/            # DB query layer
 ├── alembic/versions/            # Migrations
 ├── tests/                       # Pytest suite
+├── .env.example                 # Environment variable template
 ├── Dockerfile
 └── docker-compose.yml
 ```
@@ -160,12 +186,15 @@ backend/
 
 ## 🔒 Security
 
-- Users can only mark progress on **assigned** roadmaps (403 otherwise)
+- `GET /progress/roadmaps/{id}` returns **403** if user is not enrolled → frontend uses this as the authoritative enrollment check
+- Users can only update progress on **assigned** roadmaps (403 otherwise)
 - **Strict Mode**: requires quiz pass before marking Done
-- Quiz correct answers stored server-side only
+- Quiz correct answers stored **server-side only** (as hidden system chat messages)
 - Passwords: bcrypt | Refresh tokens: SHA-256 hashed in DB
+- `backend/.env` is in `.gitignore` — **never commit secrets**
 
 ## 🌟 Bonus Features
 
 1. **AI Roadmap Generator** — `POST /api/v1/roadmaps/generate`
 2. **Strict Mode** — toggle on assignments via `PATCH /api/v1/admin/assignments/{id}`
+3. **Resume Skill Extraction** — `POST /api/v1/resume/upload`
