@@ -21,7 +21,7 @@ AI-Powered Enterprise Learning & Development Platform — full-stack monorepo.
 
 ---
 
-## 🗂️ Monorepo Structure
+## Project Structure
 
 ```
 skillnexus/
