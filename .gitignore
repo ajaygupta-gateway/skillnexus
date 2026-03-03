@@ -26,6 +26,11 @@ ENV/
 env/
 .env
 .env.local
+.env.*.local
+.env.production.local
+backend/.env
+frontend/.env
+*.env
 
 # IDEs
 .idea/

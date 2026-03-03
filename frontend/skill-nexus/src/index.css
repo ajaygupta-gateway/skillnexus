@@ -537,7 +537,7 @@ tr:hover td {
 }
 
 /* Remove default margin from last child inside assistant bubble */
-.chat-bubble.assistant > *:last-child {
+.chat-bubble.assistant>*:last-child {
   margin-bottom: 0 !important;
 }
 
@@ -550,13 +550,29 @@ tr:hover td {
 
 /* Typing indicator dots */
 @keyframes pulse {
-  0%, 100% { opacity: 0.3; transform: scale(0.85); }
-  50%       { opacity: 1;   transform: scale(1); }
+
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.85);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @keyframes slideInRight {
-  from { opacity: 0; transform: translateX(60px); }
-  to   { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    transform: translateX(60px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .chat-input-row .input {
