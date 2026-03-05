@@ -72,6 +72,8 @@ export default function AdminPanel() {
     const [loading, setLoading] = useState(true);
 
     const isManager = user?.role === 'manager';
+    const userNameById = Object.fromEntries(users.map(u => [u.id, u.display_name]));
+    const roadmapTitleById = Object.fromEntries(roadmaps.map(r => [r.id, r.title]));
 
     const load = async () => {
         setLoading(true);
@@ -84,14 +86,26 @@ export default function AdminPanel() {
             setAssignments(asgn.data.items || []);
 
             if (!isManager) {
-                const [uList, rList, gaps] = await Promise.all([
+                const [uList, rList] = await Promise.all([
                     userApi.list({ page_size: 100 }),
                     roadmapApi.list({ published_only: false, page_size: 100 }),
-                    adminApi.skillGaps(),
                 ]);
-                setUsers(uList.data.users || []);
-                setRoadmaps(rList.data.items || []);
-                setSkillGaps(gaps.data || []);
+                const usersData = uList.data.items || uList.data.users || [];
+                const roadmapsData = rList.data.items || [];
+                setUsers(usersData);
+                setRoadmaps(roadmapsData);
+
+                // skill-gaps endpoint requires roadmap_id; load safely using first roadmap if present
+                if (roadmapsData.length > 0) {
+                    try {
+                        const gaps = await adminApi.skillGaps({ roadmap_id: roadmapsData[0].id });
+                        setSkillGaps(gaps.data || []);
+                    } catch {
+                        setSkillGaps([]);
+                    }
+                } else {
+                    setSkillGaps([]);
+                }
             }
         } catch { /* noop */ }
         finally { setLoading(false); }
@@ -147,8 +161,8 @@ export default function AdminPanel() {
                                         ? <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--muted)' }}>No assignments yet.</td></tr>
                                         : assignments.map(a => (
                                             <tr key={a.id}>
-                                                <td>{a.user_display_name || a.user_id}</td>
-                                                <td>{a.roadmap_title || a.roadmap_id}</td>
+                                                <td>{a.user_display_name || userNameById[a.user_id] || a.user_id}</td>
+                                                <td>{a.roadmap_title || roadmapTitleById[a.roadmap_id] || a.roadmap_id}</td>
                                                 <td><span className={`badge badge-${a.status === 'active' ? 'primary' : a.status === 'completed' ? 'success' : 'muted'}`}>{a.status}</span>
                                                     {a.strict_mode && <span className="badge badge-warn" style={{ marginLeft: 4 }}>strict</span>}
                                                 </td>

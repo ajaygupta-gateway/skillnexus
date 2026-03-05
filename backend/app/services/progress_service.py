@@ -148,20 +148,34 @@ class ProgressService:
         )
         pages = (total + page_size - 1) // page_size
 
-        items = [
-            AssignmentResponse(
-                id=a.id,
-                user_id=a.user_id,
-                roadmap_id=a.roadmap_id,
-                assigned_by=a.assigned_by,
-                status=a.status,
-                completion_percentage=a.completion_percentage,
-                strict_mode=a.strict_mode,
-                assigned_at=a.assigned_at,
-                last_active_at=a.last_active_at,
+        user_cache: dict[uuid.UUID, str | None] = {}
+        roadmap_cache: dict[uuid.UUID, str | None] = {}
+
+        items: list[AssignmentResponse] = []
+        for a in assignments:
+            if a.user_id not in user_cache:
+                user = await self.user_repo.get_by_id(a.user_id)
+                user_cache[a.user_id] = user.display_name if user else None
+
+            if a.roadmap_id not in roadmap_cache:
+                roadmap = await self.roadmap_repo.get_by_id(a.roadmap_id)
+                roadmap_cache[a.roadmap_id] = roadmap.title if roadmap else None
+
+            items.append(
+                AssignmentResponse(
+                    id=a.id,
+                    user_id=a.user_id,
+                    roadmap_id=a.roadmap_id,
+                    assigned_by=a.assigned_by,
+                    status=a.status,
+                    completion_percentage=a.completion_percentage,
+                    strict_mode=a.strict_mode,
+                    assigned_at=a.assigned_at,
+                    last_active_at=a.last_active_at,
+                    user_display_name=user_cache[a.user_id],
+                    roadmap_title=roadmap_cache[a.roadmap_id],
+                )
             )
-            for a in assignments
-        ]
         return {"items": items, "total": total, "page": page, "page_size": page_size, "pages": pages}
 
     async def update_assignment(

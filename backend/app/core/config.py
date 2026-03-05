@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     JWT_SECRET_KEY: str = Field(min_length=32)
     JWT_REFRESH_SECRET_KEY: str = Field(min_length=32)
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
     # ── LLM Provider ──────────────────────────────────────────────────────────
@@ -50,7 +50,7 @@ class Settings(BaseSettings):
 
     # Gemini
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-1.5-flash"
+    GEMINI_MODEL: str = "gemini-2.5-flash-lite"
 
     # Groq
     GROQ_API_KEY: str = ""
