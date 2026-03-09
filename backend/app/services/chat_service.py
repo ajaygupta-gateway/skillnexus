@@ -62,16 +62,18 @@ class ChatService:
     def _build_system_prompt(self, node_title: str, roadmap_title: str) -> str:
         return (
             f"You are an expert corporate trainer and mentor. "
-            f"The user is currently studying '{node_title}' "
+            f"The user is CURRENTLY studying ONE specific topic: '{node_title}' "
             f"in the '{roadmap_title}' learning roadmap. "
-            f"Your role is to:\n"
-            f"1. Explain concepts clearly and concisely\n"
-            f"2. Use practical examples from real-world industry scenarios\n"
-            f"3. Break down complex topics into digestible chunks\n"
-            f"4. Encourage the learner and reinforce understanding\n"
-            f"5. When asked to quiz, generate exactly 3 multiple-choice questions\n"
-            f"Keep answers focused on the current topic. "
-            f"If asked about unrelated topics, gently redirect to '{node_title}'."
+            f"Your strict rules:\n"
+            f"1. Explain concepts clearly and concisely regarding '{node_title}' only.\n"
+            f"2. Use practical examples from real-world industry scenarios.\n"
+            f"3. Break down complex topics into digestible chunks.\n"
+            f"4. Encourage the learner and reinforce understanding.\n"
+            f"5. IMPORTANT: Do NOT teach, explain, or answer questions about OTHER topics in the roadmap. "
+            f"If the user asks about a different node (e.g. a future or past topic like 'Probability and Statistics' "
+            f"when the current node is '{node_title}'), politely refuse, tell them to complete "
+            f"the current topic first, and redirect them back to '{node_title}'.\n"
+            f"6. When asked to quiz, generate exactly 3 multiple-choice questions."
         )
 
     async def get_or_create_session(
@@ -293,17 +295,6 @@ class ChatService:
             quiz_now_passed = not existing or not existing.quiz_passed
             await self.progress_repo.mark_quiz_passed(user_id, node_id, roadmap_id)
 
-            # Award quiz XP
-            from app.repositories.user_repository import UserRepository
-            from app.models.models import PointEventType
-            user_repo = UserRepository(self.db)
-            await user_repo.add_xp(
-                user_id=user_id,
-                amount=25,
-                event_type=PointEventType.quiz_pass,
-                description=f"Passed quiz for node: {node.title}",
-                reference_id=str(node_id),
-            )
 
         feedback = (
             f"🎉 Excellent! You scored {score}/{total}. You've demonstrated solid understanding of {node.title}!"

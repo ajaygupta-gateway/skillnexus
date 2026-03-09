@@ -9,6 +9,7 @@ from app.schemas.base import BaseSchema, UUIDMixin
 # ── Progress ───────────────────────────────────────────────────────────────────
 class NodeProgressUpdateRequest(BaseSchema):
     status: str = Field(pattern="^(in_progress|done)$")
+    bypass_quiz: bool = False
 
 
 class NodeProgressResponse(UUIDMixin, BaseSchema):

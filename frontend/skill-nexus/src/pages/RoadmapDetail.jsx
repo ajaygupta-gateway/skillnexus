@@ -17,35 +17,155 @@ import { Send, CheckCircle, Clock, Lock, Plus, Trash2, BookOpen, MessageSquare, 
 // We need a flat array to build the graph and compute order.
 function flattenTree(nodeList) {
     const result = [];
-    function walk(nodes) {
+    function walk(nodes, depth = 0) {
         for (const node of nodes) {
             const { children, ...rest } = node;
+            rest.has_children = children && children.length > 0;
+            rest._depth = depth;
             result.push(rest);
-            if (children && children.length > 0) walk(children);
+            if (children && children.length > 0) walk(children, depth + 1);
         }
     }
     walk(nodeList);
     return result;
 }
 
-/* ─── Compute which nodes are "unlocked" given the ordered sequence ─── */
-// Rule: first node is always in_progress for enrolled users.
-// Node N is unlocked when node N-1 is done AND quiz_passed = true.
+/* ─── Depth-aware node label helpers ─────────────────────────────── */
+function toRoman(n) {
+    const vals = [1000,900,500,400,100,90,50,40,10,9,5,4,1];
+    const syms = ['m','cm','d','cd','c','xc','l','xl','x','ix','v','iv','i'];
+    let r = '';
+    for (let i = 0; i < vals.length; i++) {
+        while (n >= vals[i]) { r += syms[i]; n -= vals[i]; }
+    }
+    return r;
+}
+
+// Returns the fully formatted label string for a node:
+//   depth 0 (root)       → "1. Title"
+//   depth 1 (child)      → "a. Title"
+//   depth 2 (grandchild) → "i. Title"
+//   deeper               → "1. Title" (numeric fallback)
+function formatNodeLabel(node) {
+    const idx  = node.order_index ?? 0;
+    const depth = node._depth ?? 0;
+    let prefix;
+    if (depth === 0)      prefix = `${idx + 1}.`;
+    else if (depth === 1) prefix = `${String.fromCharCode(97 + (idx % 26))}.`;
+    else if (depth === 2) prefix = `${toRoman(idx + 1)}.`;
+    else                  prefix = `${idx + 1}.`;
+    return `${prefix} ${node.title}`;
+}
+
+/*
+ * A "header node" is a parent section with no real content to learn.
+ * It organises children but has no description/resources of its own,
+ * OR simply has child nodes nested under it.
+ * Header nodes:
+ *  - auto-derive their status from children (no manual action needed)
+ *  - do NOT require a quiz to be passed
+ *  - do NOT block child unlock with a quiz requirement
+ */
+function isHeaderNode(node) {
+    return !!node.has_children;
+}
+
+/**
+ * Returns true if nodeId OR any of its descendants appear in progressMap.
+ * Used to determine whether a header section has been "entered" by the learner.
+ */
+function hasDescendantProgress(nodeId, allNodes, progressMap) {
+    const children = allNodes.filter(n => n.parent_id === nodeId);
+    for (const child of children) {
+        if (progressMap[child.id]) return true;
+        if (hasDescendantProgress(child.id, allNodes, progressMap)) return true;
+    }
+    return false;
+}
+
+/* ─── Compute which nodes are "unlocked" given the learning sequence ─── */
+/*
+ * RECURSION SAFETY: this function may call itself with `prev` (the previous
+ * node in DFS order). Each recursive call operates on a strictly earlier
+ * DFS index, so the chain always terminates at DFS[0] where  progressMap
+ * is populated by the backend on enroll.
+ *
+ * allDone uses progressMap directly (no child-recursion) so there is
+ * no circular header→content→header loop.
+ */
 function computeEffectiveStatus(node, orderedNodes, progressMap, quizPassedMap, isAssigned) {
+    // ── Header / section nodes ───────────────────────────────────────────
+    if (isHeaderNode(node)) {
+        if (!isAssigned) return 'locked';
+
+        // 1. Respect any explicit backend-set status
+        if (progressMap[node.id] === 'done') return 'done';
+        if (progressMap[node.id] === 'in_progress') return 'in_progress';
+
+        // 2. 'done' when ALL direct children recorded as done in progressMap
+        //    (uses progressMap directly — NOT recursive to avoid header↔content loops)
+        const children = orderedNodes.filter(n => n.parent_id === node.id);
+        if (children.length > 0 && children.every(c => progressMap[c.id] === 'done')) {
+            return 'done';
+        }
+
+        // 3. 'in_progress' if any descendant already has progress
+        if (hasDescendantProgress(node.id, orderedNodes, progressMap)) return 'in_progress';
+
+        // 4. DFS index 0 is always unlocked on enroll
+        const idx = orderedNodes.findIndex(n => n.id === node.id);
+        if (idx === 0) return 'in_progress';
+        if (idx < 0) return 'locked';
+
+        // 5. CASCADE: previous DFS node may unlock this header.
+        //    Recurse into prev — safe because prev is at a strictly smaller DFS index,
+        //    so the chain terminates at root (which has progressMap set by backend).
+        const prev = orderedNodes[idx - 1];
+        const prevStatus = computeEffectiveStatus(prev, orderedNodes, progressMap, quizPassedMap, isAssigned);
+        if (prevStatus === 'in_progress' || prevStatus === 'done') {
+            // Unlock only the FIRST child of that previous header section
+            if (isHeaderNode(prev)) {
+                const olderSiblings = orderedNodes.filter(
+                    n => n.parent_id === prev.id && (n.order_index || 0) < (node.order_index || 0)
+                );
+                if (olderSiblings.length === 0) return 'in_progress';
+            } else if (progressMap[prev.id] === 'done' && quizPassedMap[prev.id]) {
+                // Previous was a completed content node → this header section unlocks
+                return 'in_progress';
+            }
+        }
+
+        return 'locked';
+    }
+
+    // ── Leaf / content nodes ─────────────────────────────────────────────
     const nodeStatus = progressMap[node.id];
     if (nodeStatus === 'done') return 'done';
     if (nodeStatus === 'in_progress') return 'in_progress';
 
     const idx = orderedNodes.findIndex(n => n.id === node.id);
-
-    // First node: always unlocked for enrolled users
-    if (idx === 0) return isAssigned ? 'in_progress' : 'locked';
     if (idx < 0) return 'locked';
+    if (idx === 0) return isAssigned ? 'in_progress' : 'locked';
 
-    // Subsequent nodes: check predecessor is done AND quiz passed
     const prev = orderedNodes[idx - 1];
+
+    // Previous is a header section → recurse to get its real status
+    // (safe: recursive call is on prev which is at a smaller DFS index)
+    if (isHeaderNode(prev)) {
+        const prevStatus = computeEffectiveStatus(prev, orderedNodes, progressMap, quizPassedMap, isAssigned);
+        if (prevStatus === 'in_progress' || prevStatus === 'done') {
+            // Unlock only the FIRST child of that header
+            const olderSiblings = orderedNodes.filter(
+                n => n.parent_id === prev.id && (n.order_index || 0) < (node.order_index || 0)
+            );
+            if (olderSiblings.length === 0) return 'in_progress';
+        }
+        return 'locked';
+    }
+
+    // Normal content node: previous must be done + quiz passed
     if (progressMap[prev.id] === 'done' && quizPassedMap[prev.id]) {
-        return 'in_progress'; // unlocked
+        return 'in_progress';
     }
     return 'locked';
 }
@@ -54,8 +174,12 @@ function computeEffectiveStatus(node, orderedNodes, progressMap, quizPassedMap, 
 function buildGraph(nodes, progressMap, quizPassedMap, isAssigned, selectedId, onClickNode) {
     const W = 220, H = 80;
 
-    // Sort nodes for the linear sequence (by order_index)
-    const orderedNodes = [...nodes].sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+    // nodes arrives in preorder DFS sequence from flattenTree (flatNodes).
+    // Within each sibling group, flattenTree walks in the order given by the
+    // backend's CTE, which sorts by path+order_index — so it IS already the
+    // correct learning sequence.  A global re-sort by order_index would
+    // scramble nodes across depths (every depth starts its own 0-based index).
+    const orderedNodes = nodes; // preserve DFS/learning order
 
     // 1. Setup Dagre graph
     const g = new dagre.graphlib.Graph();
@@ -108,7 +232,7 @@ function buildGraph(nodes, progressMap, quizPassedMap, isAssigned, selectedId, o
                 y: n.position_y !== 0 ? n.position_y : dNode.y - H / 2,
             },
             data: {
-                label: `${typeof n.order_index !== 'undefined' ? n.order_index + 1 + '.' : ''} ${n.title}`,
+                label: formatNodeLabel(n),
                 status: effectiveStatus,
                 selected: n.id === selectedId,
                 onClick: () => onClickNode(n),
@@ -167,7 +291,7 @@ function QuizModal({ node, onClose, onPassed }) {
                     <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={14} /></button>
                 </div>
                 <p className="text-muted" style={{ fontSize: 13, marginBottom: 16 }}>
-                    Answer all questions correctly to unlock the next node.
+                    Answer atleast 2 questions correctly to unlock the next node.
                 </p>
 
                 {loading && <div className="loading-center"><div className="spinner" /></div>}
@@ -317,6 +441,7 @@ function NodeInfoPanel({ node, effectiveStatus, onMarkDone, onMarkInProgress, is
     const [saving, setSaving] = useState(false);
     const isLocked = effectiveStatus === 'locked';
     const isDone = effectiveStatus === 'done';
+    const isHeader = isHeaderNode(node);
 
     return (
         <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -329,11 +454,26 @@ function NodeInfoPanel({ node, effectiveStatus, onMarkDone, onMarkInProgress, is
             {(isAssigned || isAdmin) ? (
                 <div>
                     <div className="text-muted" style={{ fontSize: 12, marginBottom: 8 }}>Your Status</div>
-                    {isLocked ? (
+
+                    {/* Header/section nodes: no action needed — auto-completes when all children done */}
+                    {isHeader ? (
+                        isDone ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--success)', fontSize: 13, padding: '8px 0' }}>
+                                <CheckCircle size={16} /> <strong>Section Complete!</strong>
+                            </div>
+                        ) : (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                                <BookOpen size={14} color="var(--primary-h)" />
+                                <span style={{ fontSize: 13, color: 'var(--muted)' }}>
+                                    This section completes automatically when all sub-topics are finished.
+                                </span>
+                            </div>
+                        )
+                    ) : isLocked ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)' }}>
                             <Lock size={14} color="var(--muted)" />
                             <span style={{ fontSize: 13, color: 'var(--muted)' }}>
-                                Complete the previous node and pass its quiz to unlock this one.
+                                Complete the previous topic and pass its quiz to unlock this one.
                             </span>
                         </div>
                     ) : isDone ? (
@@ -341,7 +481,7 @@ function NodeInfoPanel({ node, effectiveStatus, onMarkDone, onMarkInProgress, is
                             <CheckCircle size={16} /> <strong>Completed!</strong>
                         </div>
                     ) : (
-                        /* Unlocked node — show both buttons */
+                        /* Unlocked content node — show action buttons */
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                             <button className="btn btn-ghost btn-sm" disabled={saving}
                                 onClick={async () => { setSaving(true); await onMarkInProgress(node); setSaving(false); }}>
@@ -524,9 +664,106 @@ export default function RoadmapDetail() {
         }
     };
 
-    // Called when learner clicks "Mark as Done" — show quiz FIRST
-    // Backend is only updated after the quiz is passed (in handleQuizPassed)
+    // ── Section header auto-complete check ──────────────────────────────────
+    // Called after any node is marked done. If completed node's parent is a header,
+    // check if all its children are now done → if yes, auto-mark parent done too.
+    const checkAndAutoCompleteParent = async (completedNodeId, currentPMap, currentQMap) => {
+        const completedNode = flatNodes.find(n => n.id === completedNodeId);
+        if (!completedNode?.parent_id) return { pMap: currentPMap, qMap: currentQMap };
+
+        const parent = flatNodes.find(n => n.id === completedNode.parent_id);
+        if (!parent || !isHeaderNode(parent)) return { pMap: currentPMap, qMap: currentQMap };
+
+        const siblings = flatNodes.filter(n => n.parent_id === parent.id);
+        const allSiblingsDone = siblings.every(s => currentPMap[s.id] === 'done');
+        if (allSiblingsDone && currentPMap[parent.id] !== 'done') {
+            try {
+                await progressApi.updateNode(parent.roadmap_id, parent.id, { status: 'done', bypass_quiz: true });
+            } catch { /* parent might already be done */ }
+            const newPMap = { ...currentPMap, [parent.id]: 'done' };
+            const newQMap = { ...currentQMap, [parent.id]: true };
+            return { pMap: newPMap, qMap: newQMap };
+        }
+        return { pMap: currentPMap, qMap: currentQMap };
+    };
+
+    const markNodeCompleted = async (completedNode, bypassQuiz = false) => {
+        // 1. Mark the completed node as 'done' in the backend, pass bypass_quiz if applicable
+        try {
+            await progressApi.updateNode(completedNode.roadmap_id, completedNode.id, { 
+                status: 'done', 
+                bypass_quiz: bypassQuiz 
+            });
+        } catch {
+            // If already done, fine
+        }
+
+        // 2. Update local state: node is done + quiz passed
+        let newPMap = { ...progressMap, [completedNode.id]: 'done' };
+        let newQMap = { ...quizPassedMap, [completedNode.id]: true };
+
+        // 2a. Auto-complete parent header if all its children are now done
+        const parentResult = await checkAndAutoCompleteParent(completedNode.id, newPMap, newQMap);
+        newPMap = parentResult.pMap;
+        newQMap = parentResult.qMap;
+
+        setProgressMap(newPMap);
+        setQuizPassedMap(newQMap);
+
+        // 3. Find next CONTENT node to unlock (skip header nodes — they auto-manage)
+        const orderedNodes = [...flatNodes].sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+        // Find the next sibling content node (same parent, next order_index)
+        const siblingNext = flatNodes
+            .filter(n => n.parent_id === completedNode.parent_id && !isHeaderNode(n)
+                && (n.order_index || 0) > (completedNode.order_index || 0))
+            .sort((a, b) => (a.order_index || 0) - (b.order_index || 0))[0];
+
+        const nextNode = siblingNext || (() => {
+            // No more siblings → look for next section (next root node or next at same parent level)
+            const currentIdx = orderedNodes.findIndex(n => n.id === completedNode.id);
+            for (let i = currentIdx + 1; i < orderedNodes.length; i++) {
+                const candidate = orderedNodes[i];
+                if (!isHeaderNode(candidate)) return candidate;
+            }
+            return null;
+        })();
+
+        if (nextNode && newPMap[nextNode.id] !== 'in_progress' && newPMap[nextNode.id] !== 'done') {
+            try {
+                await progressApi.updateNode(nextNode.roadmap_id || completedNode.roadmap_id, nextNode.id, { status: 'in_progress' });
+                const withNext = { ...newPMap, [nextNode.id]: 'in_progress' };
+                setProgressMap(withNext);
+                rebuildGraph(flatNodes, withNext, newQMap, selectedNode?.id);
+            } catch {
+                rebuildGraph(flatNodes, newPMap, newQMap, selectedNode?.id);
+            }
+        } else {
+            rebuildGraph(flatNodes, newPMap, newQMap, selectedNode?.id);
+        }
+
+        // 4. Show XP toast only for ROOT node completions (matches backend award logic).
+        //    Per-section XP = pool (50) / number of root nodes.
+        const isRootNode = !completedNode.parent_id;
+        if (!bypassQuiz && isRootNode) {
+            const rootCount = flatNodes.filter(n => !n.parent_id).length || 1;
+            const xpEarned = Math.max(1, Math.floor(50 / rootCount));
+            setXpToast({ amount: xpEarned, nodeName: completedNode.title });
+            setTimeout(() => setXpToast(null), 4000);
+        } else if (bypassQuiz && isRootNode) {
+            // Auto-completed section header (all children done)
+            const rootCount = flatNodes.filter(n => !n.parent_id).length || 1;
+            const xpEarned = Math.max(1, Math.floor(50 / rootCount));
+            setXpToast({ amount: xpEarned, nodeName: completedNode.title });
+            setTimeout(() => setXpToast(null), 4000);
+        }
+        reloadUser();
+    };
+
+    // Called when learner clicks "Mark as Done" on a CONTENT node
     const handleMarkDone = (node) => {
+        // Header nodes are auto-managed — this button shouldn't appear for them,
+        // but guard against it just in case
+        if (isHeaderNode(node)) return;
         setQuizNode(node); // opens quiz modal
     };
 
@@ -542,45 +779,10 @@ export default function RoadmapDetail() {
         }
     };
 
-    // Called when quiz is passed — NOW mark node as done and unlock the next node
+    // Called when quiz is passed from modal — NOW mark node as done
     const handleQuizPassed = async () => {
         if (!quizNode) return;
-
-        // 1. Mark the completed node as 'done' in the backend
-        try {
-            await progressApi.updateNode(quizNode.roadmap_id, quizNode.id, { status: 'done' });
-        } catch {
-            // If already done, fine
-        }
-
-        // 2. Update local state: node is done + quiz passed
-        const newPMap = { ...progressMap, [quizNode.id]: 'done' };
-        const newQMap = { ...quizPassedMap, [quizNode.id]: true };
-        setProgressMap(newPMap);
-        setQuizPassedMap(newQMap);
-
-        // 3. Unlock the next node in the ordered sequence
-        const orderedNodes = [...flatNodes].sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
-        const currentIdx = orderedNodes.findIndex(n => n.id === quizNode.id);
-        if (currentIdx >= 0 && currentIdx + 1 < orderedNodes.length) {
-            const nextNode = orderedNodes[currentIdx + 1];
-            try {
-                await progressApi.updateNode(quizNode.roadmap_id, nextNode.id, { status: 'in_progress' });
-                const withNext = { ...newPMap, [nextNode.id]: 'in_progress' };
-                setProgressMap(withNext);
-                rebuildGraph(flatNodes, withNext, newQMap, selectedNode?.id);
-            } catch {
-                rebuildGraph(flatNodes, newPMap, newQMap, selectedNode?.id);
-            }
-        } else {
-            rebuildGraph(flatNodes, newPMap, newQMap, selectedNode?.id);
-        }
-
-        // 4. Show XP toast + refresh sidebar user data
-        setXpToast({ amount: 25, nodeName: quizNode.title });
-        setTimeout(() => setXpToast(null), 4000);
-        reloadUser(); // updates Level/XP in sidebar without page refresh
-
+        await markNodeCompleted(quizNode, false);
         setQuizNode(null);
     };
 
@@ -603,7 +805,10 @@ export default function RoadmapDetail() {
     };
 
     const handlePublish = async () => {
-        try { const r = await roadmapApi.publish(id); setRoadmap(r.data); }
+        try {
+            await roadmapApi.publish(id);
+            navigate('/roadmaps');
+        }
         catch (err) { alert(err.response?.data?.detail || 'Error'); }
     };
 
@@ -621,10 +826,10 @@ export default function RoadmapDetail() {
     const completedCount = Object.values(progressMap).filter(s => s === 'done').length;
     const pct = flatNodes.length ? Math.round((completedCount / flatNodes.length) * 100) : 0;
 
-    // Compute effective status for the selected node (must pass isAssigned!)
-    const orderedAll = [...flatNodes].sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+    // Compute effective status for the selected node.
+    // flatNodes is already in preorder DFS learning order — do NOT re-sort.
     const selectedEffectiveStatus = selectedNode
-        ? computeEffectiveStatus(selectedNode, orderedAll, progressMap, quizPassedMap, isAssigned)
+        ? computeEffectiveStatus(selectedNode, flatNodes, progressMap, quizPassedMap, isAssigned)
         : null;
 
     return (

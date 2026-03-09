@@ -63,6 +63,7 @@ async def update_node_progress(
         roadmap_id=roadmap_id,
         node_id=node_id,
         new_status=data.status,
+        bypass_quiz=data.bypass_quiz,
     )
 
 

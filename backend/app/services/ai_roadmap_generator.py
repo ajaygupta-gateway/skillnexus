@@ -12,7 +12,7 @@ import uuid
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import LLMException, NotFoundException
+from app.core.exceptions import BadRequestException, LLMException, NotFoundException
 from app.models.models import User
 from app.repositories.roadmap_repository import RoadmapRepository
 from app.schemas.roadmap import GenerateRoadmapRequest, RoadmapDetailResponse
@@ -62,11 +62,44 @@ class AIRoadmapGeneratorService:
         data: GenerateRoadmapRequest,
         current_user: User,
     ) -> RoadmapDetailResponse:
+        # ── Step 0: Validate the prompt is a meaningful learning/career topic ──
+        class _ValidationResult(BaseModel):
+            is_valid: bool = Field(
+                description=(
+                    "True if the prompt is a meaningful, real-world learning or career topic "
+                    "(e.g. 'Python Developer', 'Machine Learning Engineer', 'AWS Solutions Architect'). "
+                    "False if it appears to be random text, gibberish, or completely unrelated to "
+                    "professional skills or technology (e.g. '125adfd developer', 'asdfg', 'banana cat')."
+                )
+            )
+            reason: str = Field(description="Short explanation of why the prompt is valid or invalid.")
+
+        validation_prompt = (
+            f"Evaluate whether the following text is a meaningful, recognisable learning or career-path topic:\n"
+            f"'{data.prompt}'\n\n"
+            f"Respond with is_valid=true only if it clearly describes a real technology, skill, role, or "
+            f"professional domain. Respond with is_valid=false for gibberish, random strings, or obviously "
+            f"non-educational phrases."
+        )
+
+        try:
+            validation_llm = get_structured_llm(_ValidationResult)
+            validation: _ValidationResult = await validation_llm.ainvoke(validation_prompt)
+        except Exception as e:
+            raise LLMException(f"Prompt validation failed: {str(e)}")
+
+        if not validation.is_valid:
+            raise BadRequestException(
+                f"The provided topic does not appear to be a valid learning subject. "
+                f"Please enter a clear role or skill (e.g., 'Python Developer', 'Data Science'). "
+                f"({validation.reason})"
+            )
+
         prompt = (
             f"Create a comprehensive learning roadmap based on this request:\n"
             f"'{data.prompt}'\n\n"
             f"Guidelines:\n"
-            f"- Generate 8-20 nodes organized in a logical learning progression\n"
+            f"- Generate 8-20 nodes organised in a logical learning progression\n"
             f"- Use parent_title to establish hierarchy (e.g., 'Java Basics' → 'OOP in Java')\n"
             f"- Root nodes (no parent) should be major topic areas\n"
             f"- Leaf nodes should be specific, learnable skills\n"

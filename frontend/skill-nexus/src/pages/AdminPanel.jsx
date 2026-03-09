@@ -13,7 +13,8 @@ function AssignModal({ users, roadmaps, onClose, onAssigned }) {
     }));
 
     const submit = async (e) => {
-        e.preventDefault(); setSaving(true);
+        e.preventDefault();
+        setSaving(true);
         try {
             await adminApi.assign({ ...form });
             onAssigned();

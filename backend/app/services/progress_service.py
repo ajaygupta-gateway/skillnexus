@@ -257,6 +257,7 @@ class ProgressService:
         roadmap_id: uuid.UUID,
         node_id: uuid.UUID,
         new_status: str,
+        bypass_quiz: bool = False,
     ) -> NodeProgressResponse:
         # Security: must be assigned to this roadmap
         assignment = await self.repo.get_assignment(user_id, roadmap_id)
@@ -273,24 +274,69 @@ class ProgressService:
         # Check if user is allowed to move to this node (only when trying to unlock from locked state)
         existing_progress = await self.repo.get_node_progress(user_id, node_id)
         is_currently_locked = not existing_progress or existing_progress.status == NodeStatus.locked
-        
-        if status == NodeStatus.in_progress and is_currently_locked:
-            # User is trying to unlock a locked node
+
+        if status == NodeStatus.in_progress and is_currently_locked and not bypass_quiz:
+            # User is trying to unlock a node. Determine what needs to be satisfied.
             if node.parent_id:
-                # This node has a parent, check if parent is done and quiz passed
-                parent_progress = await self.repo.get_node_progress(user_id, node.parent_id)
-                if not parent_progress or parent_progress.status != NodeStatus.done:
-                    raise BadRequestException(
-                        "You must complete the previous node before unlocking this one"
+                parent_node = await self.roadmap_repo.get_node_by_id(node.parent_id)
+
+                # Check whether the parent is a "section header" (has other children).
+                # We detect this by finding sibling nodes that share the same parent_id.
+                from sqlalchemy import select as sa_select
+                from app.models.models import RoadmapNode as RNModel
+                siblings_result = await self.db.execute(
+                    sa_select(RNModel).where(
+                        RNModel.roadmap_id == roadmap_id,
+                        RNModel.parent_id == node.parent_id,
+                        RNModel.id != node_id,
                     )
-                if not parent_progress.quiz_passed:
-                    raise QuizRequiredException()
+                )
+                siblings = siblings_result.scalars().all()
+
+                if siblings:
+                    # Parent has multiple children → it's a section header.
+                    # First child: only require parent to be in_progress (enrolled).
+                    # Subsequent children: require previous sibling done+quiz_passed.
+                    prev_siblings = [
+                        s for s in siblings
+                        if (s.order_index or 0) < (node.order_index or 0)
+                    ]
+                    if not prev_siblings:
+                        # First child of section: parent in_progress is enough
+                        parent_progress = await self.repo.get_node_progress(user_id, node.parent_id)
+                        if not parent_progress or parent_progress.status not in (
+                            NodeStatus.in_progress, NodeStatus.done
+                        ):
+                            raise BadRequestException(
+                                "You must start this section before accessing its first topic"
+                            )
+                    else:
+                        # Subsequent child: previous sibling must be done + quiz_passed
+                        prev_sibling = max(prev_siblings, key=lambda s: s.order_index or 0)
+                        prev_progress = await self.repo.get_node_progress(user_id, prev_sibling.id)
+                        if not prev_progress or prev_progress.status != NodeStatus.done:
+                            raise BadRequestException(
+                                "You must complete the previous topic before unlocking this one"
+                            )
+                        if not prev_progress.quiz_passed:
+                            raise QuizRequiredException()
+                else:
+                    # Only child (or parent is a leaf node itself).
+                    # Require parent to be done + quiz_passed.
+                    parent_progress = await self.repo.get_node_progress(user_id, node.parent_id)
+                    if not parent_progress or parent_progress.status != NodeStatus.done:
+                        raise BadRequestException(
+                            "You must complete the previous node before unlocking this one"
+                        )
+                    if not parent_progress.quiz_passed:
+                        raise QuizRequiredException()
             # For root nodes, always allow unlocking if enrolled
 
         # Strict Mode: cannot mark done without quiz_passed (only if transitioning to done)
         if status == NodeStatus.done and assignment.strict_mode:
             if not existing_progress or not existing_progress.quiz_passed:
-                raise QuizRequiredException()
+                if not bypass_quiz:
+                    raise QuizRequiredException()
 
         is_newly_done = False
         if not existing_progress or existing_progress.status != NodeStatus.done:
@@ -301,16 +347,31 @@ class ProgressService:
             node_id=node_id,
             roadmap_id=roadmap_id,
             status=status,
+            quiz_passed=bypass_quiz if status == NodeStatus.done else False,
         )
 
-        # Award XP only on first completion
-        if is_newly_done:
+        # Award XP only on first completion, and ONLY for ROOT nodes
+        # (parent_id is None).  Child completions don't award XP directly —
+        # the reward comes when the whole section header auto-completes.
+        # XP per root = XP_NODE_COMPLETE pool / number of root nodes (min 1).
+        if is_newly_done and node.parent_id is None:
             from app.core.config import settings
+            from sqlalchemy import select as sa_select, func as sa_func
+            from app.models.models import RoadmapNode as _RNModel
+            root_count_result = await self.db.execute(
+                sa_select(sa_func.count(_RNModel.id)).where(
+                    _RNModel.roadmap_id == roadmap_id,
+                    _RNModel.parent_id.is_(None),
+                )
+            )
+            root_count = root_count_result.scalar_one() or 1
+            xp_per_section = max(1, settings.XP_NODE_COMPLETE // root_count)
+
             await self.user_repo.add_xp(
                 user_id=user_id,
-                amount=settings.XP_NODE_COMPLETE,
+                amount=xp_per_section,
                 event_type=PointEventType.node_complete,
-                description=f"Completed node: {node.title}",
+                description=f"Completed section: {node.title}",
                 reference_id=str(node_id),
             )
             user = await self.user_repo.get_by_id(user_id)

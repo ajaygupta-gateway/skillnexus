@@ -18,6 +18,17 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   async (err) => {
+    // Extract and format FastAPI validation errors
+    if (err.response?.data?.detail) {
+      if (Array.isArray(err.response.data.detail)) {
+        err.response.data.detail = err.response.data.detail.map(d => 
+          typeof d === 'string' ? d : (d.msg || JSON.stringify(d))
+        ).join(', ');
+      } else if (typeof err.response.data.detail === 'object') {
+        err.response.data.detail = JSON.stringify(err.response.data.detail);
+      }
+    }
+
     const original = err.config;
     if (err.response?.status === 401 && !original._retry) {
       original._retry = true;
