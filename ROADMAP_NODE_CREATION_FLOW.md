@@ -139,7 +139,7 @@ On detail page:
 - `flattenTree()` converts nested API tree to flat list for graph layout.
 - `buildGraph()`:
   - Creates edges from `parent_id`.
-  - Uses `dagre` for positions if `position_x/position_y` are 0.
+  - Uses custom manual placement logic to layout root spine and trailing children if `position_x/position_y` are 0. Admins can drag to change this later.
   - Produces React Flow nodes/edges.
 - React Flow renders the roadmap visually.
 
