@@ -1,10 +1,21 @@
+import { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, Map, Users2, User, FileText, LogOut } from 'lucide-react';
+import { LayoutDashboard, Map, Users2, User, FileText, LogOut, Moon, Sun } from 'lucide-react';
 
 export default function Layout({ children }) {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
+    const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
+
+    useEffect(() => {
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('theme', theme);
+    }, [theme]);
+
+    const toggleTheme = () => {
+        setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+    };
 
     const doLogout = async () => { await logout(); navigate('/login'); };
 
@@ -38,6 +49,11 @@ export default function Layout({ children }) {
                 </NavLink>
 
                 <div className="spacer" />
+
+                <button className="nav-link" onClick={toggleTheme} style={{ marginBottom: '8px' }}>
+                    {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+                    {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+                </button>
 
                 <div className="user-card">
                     <div className="name">{user?.display_name}</div>

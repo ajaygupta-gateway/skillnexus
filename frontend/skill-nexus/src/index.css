@@ -24,6 +24,21 @@
   --font: 'Inter', system-ui, sans-serif;
 }
 
+[data-theme="light"] {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface2: #f1f5f9;
+  --border: #e2e8f0;
+  --primary: #4f46e5;
+  --primary-h: #4338ca;
+  --success: #16a34a;
+  --warn: #d97706;
+  --danger: #dc2626;
+  --text: #0f172a;
+  --muted: #64748b;
+  --shadow: 0 4px 24px rgba(0, 0, 0, .05);
+}
+
 html {
   scroll-behavior: smooth;
 }
@@ -705,43 +720,127 @@ tr:hover td {
   margin-bottom: 16px;
 }
 
-/* ── XY Flow node styles ─────────────────────────────────────────────────── */
+/* ── XY Flow node styles (roadmap.sh-inspired) ──────────────────────────── */
+
+/* Base node */
 .sn-node {
-  background: var(--surface2);
-  border: 2px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 16px;
-  min-width: 140px;
+  border-radius: 24px;
+  padding: 8px 18px;
   cursor: pointer;
-  transition: all .15s;
+  transition: all .2s;
   text-align: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
 }
 
-.sn-node:hover {
-  border-color: var(--primary);
+/* Root / section header — large, prominent, center-spine style */
+.sn-node.sn-root {
+  background: var(--warn);
+  border: 3px solid var(--warn);
+  color: #1a1a1a;
+  min-width: 200px;
+  padding: 12px 24px;
+  border-radius: 28px;
+  font-weight: 700;
+  justify-content: center;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.sn-node.selected {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, .3);
+.sn-node.sn-root .node-title {
+  font-size: 14px;
+  font-weight: 700;
 }
 
-.sn-node.status-done {
+.sn-node.sn-root.status-done {
+  background: var(--success);
   border-color: var(--success);
+  color: #fff;
 }
 
-.sn-node.status-in_progress {
-  border-color: var(--warn);
+.sn-node.sn-root.status-locked {
+  background: var(--surface2);
+  border-color: var(--border);
+  color: var(--muted);
 }
 
-.sn-node .node-title {
+/* Header node (parent with children, not root) */
+.sn-node.sn-header {
+  background: var(--surface);
+  border: 3px solid var(--border);
+  color: var(--text);
+  min-width: 160px;
+  padding: 8px 16px;
+  border-radius: 24px;
+}
+
+.sn-node.sn-header .node-title {
   font-size: 13px;
   font-weight: 600;
 }
 
-.sn-node .node-status {
-  font-size: 11px;
-  margin-top: 3px;
+.sn-node.sn-header.status-in_progress {
+  border-color: var(--warn);
+  background: rgba(245, 158, 11, .08);
+}
+
+.sn-node.sn-header.status-done {
+  border-color: var(--success);
+  background: rgba(34, 197, 94, .08);
+}
+
+/* Leaf / content node — small pill */
+.sn-node.sn-leaf {
+  background: var(--surface);
+  border: 3px solid var(--border);
+  color: var(--text);
+  min-width: 120px;
+  padding: 6px 14px;
+  border-radius: 20px;
+}
+
+.sn-node.sn-leaf .node-title {
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.sn-node.sn-leaf.status-in_progress {
+  border-color: var(--warn);
+  background: rgba(245, 158, 11, .06);
+}
+
+.sn-node.sn-leaf.status-done {
+  border-color: var(--success);
+  background: rgba(34, 197, 94, .06);
+}
+
+/* Hover effects */
+.sn-node:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(0,0,0,.15);
+}
+
+/* Selected state */
+.sn-node.selected {
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, .4);
+  border-color: var(--primary) !important;
+}
+
+/* Highlighted state for parent/child relations in Roadmap */
+.sn-node.highlighted-node {
+  box-shadow: 0 0 0 4px rgba(219, 39, 119, 0.25) !important;
+  transform: scale(1.02);
+  z-index: 10;
+}
+
+/* Status dot indicator (like roadmap.sh checkmark circles) */
+.sn-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 /* ── Quiz ─────────────────────────────────────────────────────────────────── */

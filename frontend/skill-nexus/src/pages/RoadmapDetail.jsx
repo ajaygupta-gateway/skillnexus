@@ -1,17 +1,15 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import dagre from 'dagre';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-    ReactFlow, Background, Controls, MiniMap,
+    ReactFlow, Background, Controls, MiniMap, Handle, Position,
     useNodesState, useEdgesState,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { roadmapApi, progressApi, chatApi } from '../api/client';
 import { useAuth } from '../context/AuthContext';
-import { Send, CheckCircle, Clock, Lock, Plus, Trash2, BookOpen, MessageSquare, X, Settings } from 'lucide-react';
-
+import { Send, CheckCircle, Clock, Lock, Plus, Trash2, BookOpen, MessageSquare, X, Settings, Edit2, Save } from 'lucide-react';
 /* ─── Flatten nested tree from API into a flat array ────────────────── */
 // The API returns nodes as a nested tree (children inside parents).
 // We need a flat array to build the graph and compute order.
@@ -170,71 +168,162 @@ function computeEffectiveStatus(node, orderedNodes, progressMap, quizPassedMap, 
     return 'locked';
 }
 
-/* ─── Build React-Flow nodes + edges from flat API response ─────────── */
+/* ─── Build React-Flow nodes + edges (roadmap.sh-inspired layout) ──── */
+/*
+ * Layout strategy:
+ *   • Root nodes are placed on a VERTICAL CENTER SPINE.
+ *   • Each root's children fan out to the RIGHT side.
+ *   • Sub-children fan out further to the RIGHT.
+ *   • Root→Root = dashed vertical line (spine).
+ *   • Parent→Child = dotted/dashed line.
+ *   • Handles on nodes allow ReactFlow to draw edges.
+ */
 function buildGraph(nodes, progressMap, quizPassedMap, isAssigned, selectedId, onClickNode) {
-    const W = 220, H = 80;
+    const CENTER_X = 400;
+    const ROOT_GAP_Y = 120;   // minimum vertical gap between root sections
+    const CHILD_GAP_Y = 60;   // vertical gap between sibling children
+    const CHILD_OFFSET_X = 320; // horizontal distance from parent to children
+    const SUB_CHILD_OFFSET_X = 260; // horizontal distance for deeper children
 
-    // nodes arrives in preorder DFS sequence from flattenTree (flatNodes).
-    // Within each sibling group, flattenTree walks in the order given by the
-    // backend's CTE, which sorts by path+order_index — so it IS already the
-    // correct learning sequence.  A global re-sort by order_index would
-    // scramble nodes across depths (every depth starts its own 0-based index).
-    const orderedNodes = nodes; // preserve DFS/learning order
+    const orderedNodes = nodes;
 
-    // 1. Setup Dagre graph
-    const g = new dagre.graphlib.Graph();
-    g.setGraph({ rankdir: 'TB', nodesep: 50, ranksep: 80 });
-    g.setDefaultEdgeLabel(() => ({}));
-
-    nodes.forEach(n => { g.setNode(n.id, { width: W, height: H }); });
-
-    // Build edges from parent_id relationships
-    const xyEdges = nodes
-        .filter(n => n.parent_id)
-        .map(n => {
-            g.setEdge(n.parent_id, n.id);
-            return {
-                id: `e-${n.parent_id}-${n.id}`,
-                source: n.parent_id,
-                target: n.id,
-                style: { stroke: 'var(--border)', strokeWidth: 2 },
-                animated: progressMap[n.id] === 'in_progress',
-            };
-        });
-
-    // Link root nodes sequentially by order_index for a vertical spine
+    // Separate roots
     const roots = nodes
         .filter(n => !n.parent_id)
         .sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
-    if (roots.length > 1) {
-        for (let i = 0; i < roots.length - 1; i++) {
-            g.setEdge(roots[i].id, roots[i + 1].id);
-            xyEdges.push({
-                id: `e-root-${roots[i].id}-${roots[i + 1].id}`,
-                source: roots[i].id,
-                target: roots[i + 1].id,
-                style: { stroke: 'var(--border)', strokeWidth: 3, strokeDasharray: '5,5' },
-                animated: false,
-            });
+
+    // Build a children map keyed by parent_id
+    const childrenOf = {};
+    nodes.forEach(n => {
+        if (n.parent_id) {
+            if (!childrenOf[n.parent_id]) childrenOf[n.parent_id] = [];
+            childrenOf[n.parent_id].push(n);
         }
+    });
+    Object.values(childrenOf).forEach(arr =>
+        arr.sort((a, b) => (a.order_index || 0) - (b.order_index || 0))
+    );
+
+    // Calculate the total visual height a node's subtree needs (recursive)
+    function getSubtreeHeight(nodeId) {
+        const kids = childrenOf[nodeId] || [];
+        if (kids.length === 0) return CHILD_GAP_Y;
+        let total = 0;
+        kids.forEach(kid => {
+            total += getSubtreeHeight(kid.id);
+        });
+        return total;
     }
 
-    dagre.layout(g);
+    // Position map: nodeId → { x, y }
+    const posMap = {};
+    let currentY = 80;
 
-    const xyNodes = nodes.map((n) => {
-        const dNode = g.node(n.id);
+    roots.forEach(root => {
+        // Total height this root section occupies
+        const sectionHeight = getSubtreeHeight(root.id);
+
+        // Root position at center-left of its section
+        posMap[root.id] = { x: CENTER_X, y: currentY + sectionHeight / 2 };
+
+        // Place children to the right, vertically distributed across the section
+        placeChildren(root.id, CENTER_X, currentY, CHILD_OFFSET_X);
+
+        currentY += sectionHeight + ROOT_GAP_Y;
+    });
+
+    function placeChildren(parentId, parentX, startY, offsetX) {
+        const kids = childrenOf[parentId] || [];
+        if (kids.length === 0) return;
+
+        let yPointer = startY;
+        kids.forEach(kid => {
+            const kidHeight = getSubtreeHeight(kid.id);
+            const kidCenterY = yPointer + kidHeight / 2;
+            const kidX = parentX + offsetX;
+
+            posMap[kid.id] = { x: kidX, y: kidCenterY };
+
+            // Recursively place sub-children
+            placeChildren(kid.id, kidX, yPointer, SUB_CHILD_OFFSET_X);
+
+            yPointer += kidHeight;
+        });
+    }
+
+    // ── Build edges ──────────────────────────────────────────────────────
+
+    const xyEdges = [];
+
+    // Root-to-root spine (dashed vertical)
+    for (let i = 0; i < roots.length - 1; i++) {
+        xyEdges.push({
+            id: `e-spine-${roots[i].id}-${roots[i + 1].id}`,
+            source: roots[i].id,
+            target: roots[i + 1].id,
+            sourceHandle: 'bottom',
+            targetHandle: 'top',
+            type: 'smoothstep',
+            style: { stroke: 'var(--primary)', strokeWidth: 3, strokeDasharray: '8,6' },
+            animated: false,
+        });
+    }
+
+    // Find map of which nodes have children
+    const hasChildrenMap = {};
+    nodes.forEach(n => {
+        if (n.parent_id) hasChildrenMap[n.parent_id] = true;
+    });
+
+    // Parent-to-child connections (dotted)
+    nodes.filter(n => n.parent_id).forEach(n => {
+        const isInProgress = progressMap[n.id] === 'in_progress';
+        const isDone = progressMap[n.id] === 'done';
+        const isHighlightedEdge = selectedId && hasChildrenMap[selectedId] && n.parent_id === selectedId;
+
+        xyEdges.push({
+            id: `e-${n.parent_id}-${n.id}`,
+            source: n.parent_id,
+            target: n.id,
+            sourceHandle: 'right',
+            targetHandle: 'left',
+            type: 'smoothstep',
+            style: isHighlightedEdge
+                ? { stroke: '#db2777', strokeWidth: 4, strokeDasharray: '8,6' }
+                : {
+                    stroke: isDone ? 'var(--success)' : isInProgress ? 'var(--warn)' : 'var(--muted)',
+                    strokeWidth: 3,
+                    strokeDasharray: '5,5',
+                },
+            animated: isInProgress || isHighlightedEdge,
+            zIndex: isHighlightedEdge ? 10 : 0,
+        });
+    });
+
+    // ── Build ReactFlow nodes ────────────────────────────────────────────
+
+    const xyNodes = nodes.map(n => {
         const effectiveStatus = computeEffectiveStatus(n, orderedNodes, progressMap, quizPassedMap, isAssigned);
+        const isRoot = !n.parent_id;
+        const pos = posMap[n.id] || { x: 0, y: 0 };
+
+        const isHighlightedNode = selectedId && hasChildrenMap[selectedId] && (n.id === selectedId || n.parent_id === selectedId);
+
         return {
             id: n.id,
             type: 'roadmapNode',
             position: {
-                x: n.position_x !== 0 ? n.position_x : dNode.x - W / 2,
-                y: n.position_y !== 0 ? n.position_y : dNode.y - H / 2,
+                x: n.position_x !== 0 ? n.position_x : pos.x,
+                y: n.position_y !== 0 ? n.position_y : pos.y,
             },
             data: {
                 label: formatNodeLabel(n),
                 status: effectiveStatus,
                 selected: n.id === selectedId,
+                highlighted: isHighlightedNode,
+                isRoot,
+                isHeader: isHeaderNode(n),
+                depth: n._depth || 0,
                 onClick: () => onClickNode(n),
             },
             draggable: true,
@@ -437,7 +526,7 @@ function ChatPanel({ node }) {
 }
 
 /* ─── Node Info Panel ────────────────────────────────────────────────── */
-function NodeInfoPanel({ node, effectiveStatus, onMarkDone, onMarkInProgress, isAdmin, onDelete, isAssigned }) {
+function NodeInfoPanel({ node, effectiveStatus, onMarkDone, onMarkInProgress, isAdmin, onDelete, isAssigned, onEdit }) {
     const [saving, setSaving] = useState(false);
     const isLocked = effectiveStatus === 'locked';
     const isDone = effectiveStatus === 'done';
@@ -517,11 +606,60 @@ function NodeInfoPanel({ node, effectiveStatus, onMarkDone, onMarkInProgress, is
             )}
 
             {isAdmin && (
-                <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)', borderColor: 'var(--danger)', marginTop: 4 }}
-                    onClick={() => onDelete(node)}>
-                    <Trash2 size={13} /> Delete Node
-                </button>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                    <button className="btn btn-ghost btn-sm" style={{ color: 'var(--primary)', borderColor: 'var(--primary)' }}
+                        onClick={() => onEdit(node)}>
+                        <Edit2 size={13} /> Edit Node
+                    </button>
+                    <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}
+                        onClick={() => onDelete(node)}>
+                        <Trash2 size={13} /> Delete Node
+                    </button>
+                </div>
             )}
+        </div>
+    );
+}
+
+/* ─── Edit Node Modal ─────────────────────────────────────────────────── */
+function EditNodeModal({ roadmapId, node, nodes, onClose, onEdited }) {
+    const [form, setForm] = useState({ 
+        title: node.title || '', 
+        description: node.description || '', 
+        parent_id: node.parent_id || '' 
+    });
+    const [saving, setSaving] = useState(false);
+
+    const submit = async (e) => {
+        e.preventDefault(); setSaving(true);
+        try {
+            const payload = { ...form, parent_id: form.parent_id || null };
+            const r = await roadmapApi.updateNode(roadmapId, node.id, payload);
+            onEdited(r.data);
+        } catch (err) { alert(err.response?.data?.detail || 'Error'); }
+        finally { setSaving(false); }
+    };
+
+    return (
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal" onClick={e => e.stopPropagation()}>
+                <h2>Edit Node</h2>
+                <form onSubmit={submit}>
+                    <div className="form-group"><label>Title</label><input className="input" required autoFocus value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} /></div>
+                    <div className="form-group"><label>Description</label><textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} /></div>
+                    <div className="form-group">
+                        <label>Parent Node (optional)</label>
+                        <select value={form.parent_id} onChange={e => setForm(p => ({ ...p, parent_id: e.target.value }))}>
+                            <option value="">— Root (no parent) —</option>
+                            {nodes.filter(n => n.id !== node.id).map(n => <option key={n.id} value={n.id}>{n.title}</option>)}
+                        </select>
+                    </div>
+                    <div className="modal-footer">
+                        <button className="btn btn-ghost" type="button" onClick={onClose}>Cancel</button>
+                        <button className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save Changes'}</button>
+                    </div>
+                </form>
+            </div>
         </div>
     );
 }
@@ -565,19 +703,68 @@ function AddNodeModal({ roadmapId, nodes, onClose, onAdded }) {
     );
 }
 
-/* ─── Custom node component ─────────────────────────────────────────── */
+/* ─── Custom node component (roadmap.sh-inspired) ──────────────────── */
 function RoadmapNode({ data }) {
-    const icons = {
-        done: <CheckCircle size={12} color="var(--success)" />,
-        in_progress: <Clock size={12} color="var(--warn)" />,
-        locked: <Lock size={12} color="var(--muted)" />,
-    };
-    const labels = { done: 'Done', in_progress: 'In Progress', locked: 'Locked' };
     const s = data.status || 'locked';
+    const statusColors = {
+        done: 'var(--success)',
+        in_progress: 'var(--warn)',
+        locked: 'var(--muted)',
+    };
+    const dotColor = statusColors[s];
+    const hlClass = data.highlighted ? 'highlighted-node' : '';
+
+    // Invisible handles for edge connections
+    const handleStyle = { opacity: 0, width: 6, height: 6, minWidth: 0, minHeight: 0 };
+
+    // Root / section header nodes — large prominent pill
+    if (data.isRoot) {
+        return (
+            <div
+                className={`sn-node sn-root ${data.selected ? 'selected' : ''} ${hlClass} status-${s}`}
+                onClick={data.onClick}
+            >
+                <Handle type="target" position={Position.Top} id="top" style={handleStyle} />
+                <Handle type="source" position={Position.Bottom} id="bottom" style={handleStyle} />
+                <Handle type="source" position={Position.Right} id="right" style={handleStyle} />
+                <Handle type="target" position={Position.Left} id="left" style={handleStyle} />
+                <div className="node-title">{data.label}</div>
+                <div className="sn-status-dot" style={{ background: dotColor }} />
+            </div>
+        );
+    }
+
+    // Header nodes (parents with children, but not root)
+    if (data.isHeader) {
+        return (
+            <div
+                className={`sn-node sn-header ${data.selected ? 'selected' : ''} ${hlClass} status-${s}`}
+                onClick={data.onClick}
+            >
+                <Handle type="target" position={Position.Top} id="top" style={handleStyle} />
+                <Handle type="source" position={Position.Bottom} id="bottom" style={handleStyle} />
+                <Handle type="source" position={Position.Right} id="right" style={handleStyle} />
+                <Handle type="target" position={Position.Left} id="left" style={handleStyle} />
+                <div className="sn-status-dot" style={{ background: dotColor }} />
+                <div className="node-title">{data.label}</div>
+                <div className="sn-status-dot" style={{ background: dotColor }} />
+            </div>
+        );
+    }
+
+    // Leaf / content nodes — small pill shape
     return (
-        <div className={`sn-node ${data.selected ? 'selected' : ''} status-${s}`} onClick={data.onClick}>
+        <div
+            className={`sn-node sn-leaf ${data.selected ? 'selected' : ''} ${hlClass} status-${s}`}
+            onClick={data.onClick}
+        >
+            <Handle type="target" position={Position.Top} id="top" style={handleStyle} />
+            <Handle type="source" position={Position.Bottom} id="bottom" style={handleStyle} />
+            <Handle type="source" position={Position.Right} id="right" style={handleStyle} />
+            <Handle type="target" position={Position.Left} id="left" style={handleStyle} />
+            <div className="sn-status-dot" style={{ background: dotColor }} />
             <div className="node-title">{data.label}</div>
-            <div className="node-status">{icons[s]} {labels[s]}</div>
+            <div className="sn-status-dot" style={{ background: dotColor }} />
         </div>
     );
 }
@@ -599,21 +786,28 @@ export default function RoadmapDetail() {
     const [selectedNode, setSelectedNode] = useState(null);
     const [sideTab, setSideTab] = useState('info');
     const [showAddNode, setShowAddNode] = useState(false);
+    const [showEditNode, setShowEditNode] = useState(false);
     const [quizNode, setQuizNode] = useState(null);
     const [loading, setLoading] = useState(true);
     const [xpToast, setXpToast] = useState(null); // { amount: 25, nodeName: '...' }
+    const [modifiedPositions, setModifiedPositions] = useState({});
+    const [savingPositions, setSavingPositions] = useState(false);
 
     const [xyNodes, setXyNodes, onXyNodesChange] = useNodesState([]);
     const [xyEdges, setXyEdges, onXyEdgesChange] = useEdgesState([]);
 
-    const handleNodeClick = useCallback((n) => {
-        setSelectedNode(n); setSideTab('info');
-    }, []);
-
     const rebuildGraph = useCallback((nodes, pMap, qMap, selId, assigned) => {
-        const { xyNodes: nn, xyEdges: ee } = buildGraph(nodes, pMap, qMap, assigned ?? isAssigned, selId, handleNodeClick);
+        const { xyNodes: nn, xyEdges: ee } = buildGraph(nodes, pMap, qMap, assigned ?? isAssigned, selId, n => {
+            setSelectedNode(n); setSideTab('info');
+            rebuildGraph(nodes, pMap, qMap, n.id, assigned ?? isAssigned);
+        });
         setXyNodes(nn); setXyEdges(ee);
-    }, [handleNodeClick, isAssigned]);
+    }, [isAssigned]);
+
+    const handleCloseSidebar = () => {
+        setSelectedNode(null);
+        rebuildGraph(flatNodes, progressMap, quizPassedMap, null, isAssigned);
+    };
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -793,6 +987,39 @@ export default function RoadmapDetail() {
         setShowAddNode(false);
     };
 
+    const handleEditNode = (updatedNode) => {
+        const updated = flatNodes.map(n => n.id === updatedNode.id ? { ...n, ...updatedNode } : n);
+        setFlatNodes(updated);
+        rebuildGraph(updated, progressMap, quizPassedMap, updatedNode.id);
+        setSelectedNode(updatedNode);
+        setShowEditNode(false);
+    };
+
+    const handleNodeDragStop = useCallback((event, node) => {
+        if (!isAdmin) return;
+        setFlatNodes(prev => prev.map(n => n.id === node.id ? { ...n, position_x: node.position.x, position_y: node.position.y } : n));
+        setModifiedPositions(prev => ({ 
+            ...prev, 
+            [node.id]: { position_x: node.position.x, position_y: node.position.y } 
+        }));
+    }, [isAdmin]);
+
+    const handleSavePositions = async () => {
+        const nodeIds = Object.keys(modifiedPositions);
+        if (nodeIds.length === 0) return;
+        setSavingPositions(true);
+        try {
+            await Promise.all(nodeIds.map(nodeId => 
+                roadmapApi.updateNode(id, nodeId, modifiedPositions[nodeId])
+            ));
+            setModifiedPositions({});
+        } catch (err) {
+            alert('Failed to save some node positions.');
+        } finally {
+            setSavingPositions(false);
+        }
+    };
+
     const handleDeleteNode = async (node) => {
         if (!window.confirm(`Delete "${node.title}"?`)) return;
         try {
@@ -800,7 +1027,7 @@ export default function RoadmapDetail() {
             const updated = flatNodes.filter(n => n.id !== node.id);
             setFlatNodes(updated);
             rebuildGraph(updated, progressMap, quizPassedMap, null);
-            setSelectedNode(null);
+            handleCloseSidebar();
         } catch (err) { alert(err.response?.data?.detail || 'Error'); }
     };
 
@@ -848,6 +1075,11 @@ export default function RoadmapDetail() {
                 </div>
                 {isAdmin && (
                     <div style={{ display: 'flex', gap: 8 }}>
+                        {Object.keys(modifiedPositions).length > 0 && (
+                            <button className="btn btn-primary btn-sm" onClick={handleSavePositions} disabled={savingPositions}>
+                                <Save size={13} /> {savingPositions ? 'Saving...' : 'Save Positions'}
+                            </button>
+                        )}
                         <button className="btn btn-ghost btn-sm" onClick={() => setShowAddNode(true)}><Plus size={13} /> Node</button>
                         {!roadmap.is_published && <button className="btn btn-success btn-sm" onClick={handlePublish}>Publish</button>}
                         <button className="btn btn-sm" onClick={handleDeleteRoadmap} style={{ color: 'white', backgroundColor: 'var(--danger)', borderColor: 'var(--danger)' }}>
@@ -872,6 +1104,8 @@ export default function RoadmapDetail() {
                     <ReactFlow
                         nodes={xyNodes} edges={xyEdges}
                         onNodesChange={onXyNodesChange} onEdgesChange={onXyEdgesChange}
+                        onNodeDragStop={handleNodeDragStop}
+                        onPaneClick={handleCloseSidebar}
                         nodeTypes={nodeTypes}
                         fitView
                         style={{ background: 'var(--bg)' }}
@@ -891,7 +1125,7 @@ export default function RoadmapDetail() {
                     <div className="node-sidebar" style={{ background: 'var(--surface)' }}>
                         <div className="node-sidebar-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ fontWeight: 600, fontSize: 13 }}>{selectedNode.title}</span>
-                            <button className="btn btn-ghost btn-sm" onClick={() => setSelectedNode(null)}><X size={14} /></button>
+                            <button className="btn btn-ghost btn-sm" onClick={handleCloseSidebar}><X size={14} /></button>
                         </div>
                         <div className="node-sidebar-tabs">
                             <div className={`node-sidebar-tab ${sideTab === 'info' ? 'active' : ''}`} onClick={() => setSideTab('info')}><Settings size={13} /> Info</div>
@@ -907,6 +1141,7 @@ export default function RoadmapDetail() {
                                     isAdmin={isAdmin}
                                     isAssigned={isAssigned}
                                     onDelete={handleDeleteNode}
+                                    onEdit={() => setShowEditNode(true)}
                                 />
                                 : <ChatPanel node={selectedNode} />
                             }
@@ -917,6 +1152,15 @@ export default function RoadmapDetail() {
 
             {/* Modals */}
             {showAddNode && <AddNodeModal roadmapId={id} nodes={flatNodes} onClose={() => setShowAddNode(false)} onAdded={handleAddNode} />}
+            {showEditNode && selectedNode && (
+                <EditNodeModal 
+                    roadmapId={id} 
+                    node={selectedNode} 
+                    nodes={flatNodes} 
+                    onClose={() => setShowEditNode(false)} 
+                    onEdited={handleEditNode} 
+                />
+            )}
             {quizNode && (
                 <QuizModal
                     node={quizNode}
