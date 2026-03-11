@@ -737,9 +737,9 @@ tr:hover td {
 
 /* Root / section header — large, prominent, center-spine style */
 .sn-node.sn-root {
-  background: var(--warn);
-  border: 3px solid var(--warn);
-  color: #1a1a1a;
+  background: var(--surface2);
+  border: 3px solid var(--border);
+  color: var(--muted);
   min-width: 200px;
   padding: 12px 24px;
   border-radius: 28px;
@@ -760,10 +760,10 @@ tr:hover td {
   color: #fff;
 }
 
-.sn-node.sn-root.status-locked {
-  background: var(--surface2);
-  border-color: var(--border);
-  color: var(--muted);
+.sn-node.sn-root.status-in_progress {
+  border-color: var(--primary);
+  background: rgba(99, 102, 241, .08);
+  color: var(--text);
 }
 
 /* Header node (parent with children, not root) */
@@ -782,8 +782,8 @@ tr:hover td {
 }
 
 .sn-node.sn-header.status-in_progress {
-  border-color: var(--warn);
-  background: rgba(245, 158, 11, .08);
+  border-color: var(--primary);
+  background: rgba(99, 102, 241, .08);
 }
 
 .sn-node.sn-header.status-done {
@@ -807,8 +807,8 @@ tr:hover td {
 }
 
 .sn-node.sn-leaf.status-in_progress {
-  border-color: var(--warn);
-  background: rgba(245, 158, 11, .06);
+  border-color: var(--primary);
+  background: rgba(99, 102, 241, .06);
 }
 
 .sn-node.sn-leaf.status-done {
@@ -819,7 +819,7 @@ tr:hover td {
 /* Hover effects */
 .sn-node:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(0,0,0,.15);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .15);
 }
 
 /* Selected state */

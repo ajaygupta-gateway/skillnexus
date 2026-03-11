@@ -73,7 +73,7 @@ class Settings(BaseSettings):
 
     # ── Gamification ───────────────────────────────────────────────────────────
     XP_NODE_COMPLETE: int = 50
-    XP_STREAK_BONUS: int = 100
+    XP_STREAK_BONUS: int = 30
     XP_LOGIN: int = 5
     STREAK_THRESHOLD_DAYS: int = 7
 

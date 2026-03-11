@@ -350,14 +350,16 @@ class ProgressService:
             quiz_passed=bypass_quiz if status == NodeStatus.done else False,
         )
 
-        # Award XP only on first completion, and ONLY for ROOT nodes
-        # (parent_id is None).  Child completions don't award XP directly —
-        # the reward comes when the whole section header auto-completes.
-        # XP per root = XP_NODE_COMPLETE pool / number of root nodes (min 1).
+        # Award XP only when ALL root nodes (parent_id is None) are completed.
+        # Ensure it is awarded only once upon the final root node completion.
         if is_newly_done and node.parent_id is None:
             from app.core.config import settings
             from sqlalchemy import select as sa_select, func as sa_func
             from app.models.models import RoadmapNode as _RNModel
+            from app.models.models import UserNodeProgress as _UNPModel
+            from app.models.schemas.enums import NodeStatus as _NS
+
+            # Count total root nodes
             root_count_result = await self.db.execute(
                 sa_select(sa_func.count(_RNModel.id)).where(
                     _RNModel.roadmap_id == roadmap_id,
@@ -365,18 +367,31 @@ class ProgressService:
                 )
             )
             root_count = root_count_result.scalar_one() or 1
-            xp_per_section = max(1, settings.XP_NODE_COMPLETE // root_count)
 
-            await self.user_repo.add_xp(
-                user_id=user_id,
-                amount=xp_per_section,
-                event_type=PointEventType.node_complete,
-                description=f"Completed section: {node.title}",
-                reference_id=str(node_id),
+            # Count completed root nodes for this user
+            done_root_result = await self.db.execute(
+                sa_select(sa_func.count(_RNModel.id)).join(
+                    _UNPModel, _RNModel.id == _UNPModel.node_id
+                ).where(
+                    _RNModel.roadmap_id == roadmap_id,
+                    _RNModel.parent_id.is_(None),
+                    _UNPModel.user_id == user_id,
+                    _UNPModel.status == _NS.done
+                )
             )
-            user = await self.user_repo.get_by_id(user_id)
-            if user:
-                await self.user_repo.update_level(user)
+            done_root_count = done_root_result.scalar_one() or 0
+
+            if done_root_count == root_count:
+                await self.user_repo.add_xp(
+                    user_id=user_id,
+                    amount=settings.XP_NODE_COMPLETE,
+                    event_type=PointEventType.roadmap_complete,
+                    description=f"Completed all foundations of roadmap!",
+                    reference_id=str(roadmap_id),
+                )
+                user = await self.user_repo.get_by_id(user_id)
+                if user:
+                    await self.user_repo.update_level(user)
 
         # Recalculate assignment completion percentage
         await self.repo.recalculate_completion(user_id, roadmap_id)

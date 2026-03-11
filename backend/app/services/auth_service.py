@@ -70,9 +70,10 @@ class AuthService:
             )
             # Award streak bonus if applicable
             if streak_result.get("streak_bonus_awarded"):
+                from app.core.config import settings
                 await self.user_repo.add_xp(
                     user_id=user.id,
-                    amount=100,  # settings.XP_STREAK_BONUS
+                    amount=settings.XP_STREAK_BONUS,
                     event_type=PointEventType.streak_bonus,
                     description=f"Streak bonus! {user.streak_count} day streak",
                 )
