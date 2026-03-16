@@ -159,6 +159,9 @@ class PointTransaction(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    user_name: Mapped[str] = mapped_column(
+        String(100), nullable=False
+    )
     amount: Mapped[int] = mapped_column(Integer, nullable=False)  # Can be negative
     event_type: Mapped[PointEventType] = mapped_column(
         Enum(PointEventType, name="point_event_type"), nullable=False

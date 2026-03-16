@@ -64,6 +64,7 @@ class AuthService:
             from app.models.models import PointEventType
             await self.user_repo.add_xp(
                 user_id=user.id,
+                user_name=user.display_name,
                 amount=5,  # settings.XP_LOGIN
                 event_type=PointEventType.login,
                 description="Daily login bonus",
@@ -73,6 +74,7 @@ class AuthService:
                 from app.core.config import settings
                 await self.user_repo.add_xp(
                     user_id=user.id,
+                    user_name=user.display_name,
                     amount=settings.XP_STREAK_BONUS,
                     event_type=PointEventType.streak_bonus,
                     description=f"Streak bonus! {user.streak_count} day streak",

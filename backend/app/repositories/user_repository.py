@@ -62,6 +62,7 @@ class UserRepository:
     async def add_xp(
         self,
         user_id: uuid.UUID,
+        user_name: str,
         amount: int,
         event_type: PointEventType,
         description: str | None = None,
@@ -71,6 +72,7 @@ class UserRepository:
         # Create ledger entry
         transaction = PointTransaction(
             user_id=user_id,
+            user_name=user_name,
             amount=amount,
             event_type=event_type,
             description=description,

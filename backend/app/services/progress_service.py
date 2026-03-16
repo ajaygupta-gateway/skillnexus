@@ -382,15 +382,16 @@ class ProgressService:
             done_root_count = done_root_result.scalar_one() or 0
 
             if done_root_count == root_count:
-                await self.user_repo.add_xp(
-                    user_id=user_id,
-                    amount=settings.XP_NODE_COMPLETE,
-                    event_type=PointEventType.roadmap_complete,
-                    description=f"Completed all foundations of roadmap!",
-                    reference_id=str(roadmap_id),
-                )
                 user = await self.user_repo.get_by_id(user_id)
                 if user:
+                    await self.user_repo.add_xp(
+                        user_id=user_id,
+                        user_name=user.display_name,
+                        amount=settings.XP_NODE_COMPLETE,
+                        event_type=PointEventType.roadmap_complete,
+                        description=f"Completed all foundations of roadmap!",
+                        reference_id=str(roadmap_id),
+                    )
                     await self.user_repo.update_level(user)
 
         # Recalculate assignment completion percentage
