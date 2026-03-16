@@ -68,7 +68,6 @@ export default function AdminPanel() {
     const [tab, setTab] = useState('assignments');
     const [dashboard, setDashboard] = useState(null);
     const [assignments, setAssignments] = useState([]);
-    const [skillGaps, setSkillGaps] = useState([]);
     const [requests, setRequests] = useState([]);
     const [users, setUsers] = useState([]);
     const [roadmaps, setRoadmaps] = useState([]);
@@ -105,18 +104,6 @@ export default function AdminPanel() {
                 const roadmapsData = rList.data.items || [];
                 setUsers(usersData);
                 setRoadmaps(roadmapsData);
-
-                // skill-gaps endpoint requires roadmap_id; load safely using first roadmap if present
-                if (roadmapsData.length > 0) {
-                    try {
-                        const gaps = await adminApi.skillGaps({ roadmap_id: roadmapsData[0].id });
-                        setSkillGaps(gaps.data || []);
-                    } catch {
-                        setSkillGaps([]);
-                    }
-                } else {
-                    setSkillGaps([]);
-                }
             }
         } catch { /* noop */ }
         finally { setLoading(false); }
