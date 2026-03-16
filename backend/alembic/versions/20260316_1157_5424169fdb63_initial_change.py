@@ -1,8 +1,8 @@
-"""Init
+"""initial change
 
-Revision ID: 2fe7e410ad14
+Revision ID: 5424169fdb63
 Revises: 
-Create Date: 2026-03-09 10:36:19.718696+00:00
+Create Date: 2026-03-16 11:57:51.357950
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '2fe7e410ad14'
+revision: str = '5424169fdb63'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -40,6 +40,7 @@ def upgrade() -> None:
     op.create_table('point_transactions',
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('user_id', sa.UUID(), nullable=False),
+    sa.Column('user_name', sa.String(length=100), nullable=False),
     sa.Column('amount', sa.Integer(), nullable=False),
     sa.Column('event_type', sa.Enum('node_complete', 'login', 'streak_bonus', 'quiz_pass', 'resume_upload', 'manual_award', name='point_event_type'), nullable=False),
     sa.Column('description', sa.Text(), nullable=True),

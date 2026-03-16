@@ -10,9 +10,7 @@ import '@xyflow/react/dist/style.css';
 import { roadmapApi, progressApi, chatApi } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { Send, CheckCircle, Clock, Lock, Plus, Trash2, BookOpen, MessageSquare, X, Settings, Edit2, Save } from 'lucide-react';
-/* ─── Flatten nested tree from API into a flat array ────────────────── */
-// The API returns nodes as a nested tree (children inside parents).
-// We need a flat array to build the graph and compute order.
+
 function flattenTree(nodeList) {
     const result = [];
     function walk(nodes, depth = 0) {
@@ -39,11 +37,14 @@ function toRoman(n) {
     return r;
 }
 
-// Returns the fully formatted label string for a node:
-//   depth 0 (root)       → "1. Title"
-//   depth 1 (child)      → "a. Title"
-//   depth 2 (grandchild) → "i. Title"
-//   deeper               → "1. Title" (numeric fallback)
+
+/**
+Returns the fully formatted label string for a node:
+  depth 0 (root)       → "1. Title"
+  depth 1 (child)      → "a. Title"
+  depth 2 (grandchild) → "i. Title"
+  deeper               → "1. Title" (numeric fallback)
+ */
 function formatNodeLabel(node) {
     const idx  = node.order_index ?? 0;
     const depth = node._depth ?? 0;
@@ -55,7 +56,7 @@ function formatNodeLabel(node) {
     return `${prefix} ${node.title}`;
 }
 
-/*
+/**
  * A "header node" is a parent section with no real content to learn.
  * It organises children but has no description/resources of its own,
  * OR simply has child nodes nested under it.
@@ -81,7 +82,7 @@ function hasDescendantProgress(nodeId, allNodes, progressMap) {
     return false;
 }
 
-/* ─── Compute which nodes are "unlocked" given the learning sequence ─── */
+/** ─── Compute which nodes are "unlocked" given the learning sequence ─── */
 function computeEffectiveStatus(node, orderedNodes, progressMap, quizPassedMap, isAssigned) {
     if (!isAssigned) return 'locked';
 
@@ -107,7 +108,7 @@ function computeEffectiveStatus(node, orderedNodes, progressMap, quizPassedMap, 
     return 'pending'; // Unlocked, not yet marked in progress
 }
 
-/* ─── Build React-Flow nodes + edges (roadmap.sh-inspired layout) ──── */
+/* ─── Build React-Flow nodes + edges ──── */
 /*
  * Layout strategy:
  *   • Root nodes are placed on a VERTICAL CENTER SPINE.
@@ -433,7 +434,7 @@ function ChatPanel({ node }) {
                         Ask me anything about <strong>{node?.title}</strong>
                     </p>
                 )}
-                {messages.map((m, i) => (
+                {messages.filter(m => !m.content.startsWith("__QUIZ_ANSWERS__")).map((m, i) => (
                     <div key={i} className={`chat-bubble ${m.role}`}>
                         {m.role === 'assistant'
                             ? <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
@@ -467,8 +468,6 @@ function ChatPanel({ node }) {
 /* ─── Node Info Panel ────────────────────────────────────────────────── */
 function NodeInfoPanel({ node, effectiveStatus, onMarkDone, onMarkInProgress, isAdmin, onDelete, isAssigned, onEdit }) {
     const [saving, setSaving] = useState(false);
-    const isLocked = effectiveStatus === 'locked';
-    const isDone = effectiveStatus === 'done';
     const isHeader = isHeaderNode(node);
 
     return (
@@ -641,7 +640,7 @@ function AddNodeModal({ roadmapId, nodes, onClose, onAdded }) {
     );
 }
 
-/* ─── Custom node component (roadmap.sh-inspired) ──────────────────── */
+/* ─── Custom node component */
 function RoadmapNode({ data }) {
     const s = data.status || 'locked';
     const statusColors = {

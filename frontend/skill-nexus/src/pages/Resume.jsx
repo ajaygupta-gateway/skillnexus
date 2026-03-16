@@ -1,12 +1,22 @@
-import { useState } from 'react';
-import { resumeApi } from '../api/client';
+import { useState, useEffect } from 'react';
+import { resumeApi, roadmapApi } from '../api/client';
 import { Upload, FileText, CheckCircle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 export default function Resume() {
     const [file, setFile] = useState(null);
     const [uploading, setUploading] = useState(false);
     const [result, setResult] = useState(null);
     const [error, setError] = useState('');
+    const [roadmaps, setRoadmaps] = useState([]);
+    const [requesting, setRequesting] = useState({});
+    const navigate = useNavigate();
+
+    useEffect(() => {
+        roadmapApi.list({ page_size: 100 })
+            .then(res => setRoadmaps(res.data.items || []))
+            .catch(err => console.error("Failed to fetch roadmaps", err));
+    }, []);
 
     const upload = async (e) => {
         e.preventDefault();
@@ -20,6 +30,17 @@ export default function Resume() {
         } catch (err) {
             setError(err.response?.data?.detail || 'Upload failed');
         } finally { setUploading(false); }
+    };
+
+    const handleRequest = async (title) => {
+        setRequesting(prev => ({...prev, [title]: 'loading'}));
+        try {
+            await roadmapApi.requestRoadmap(title);
+            setRequesting(prev => ({...prev, [title]: 'done'}));
+        } catch (err) {
+            alert("Failed to send request.");
+            setRequesting(prev => ({...prev, [title]: false}));
+        }
     };
 
     return (
@@ -70,11 +91,32 @@ export default function Resume() {
                     {result.suggested_roadmap_titles?.length > 0 && (
                         <div>
                             <div className="text-muted" style={{ fontSize: 12, marginBottom: 8 }}>Suggested Roadmaps</div>
-                            {result.suggested_roadmap_titles.map((t, i) => (
-                                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
-                                    <FileText size={13} color="var(--primary-h)" /> {t}
-                                </div>
-                            ))}
+                            {result.suggested_roadmap_titles.map((t, i) => {
+                                const existing = roadmaps.find(r => r.title.toLowerCase() === t.toLowerCase());
+                                return (
+                                    <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <FileText size={13} color="var(--primary-h)" /> {t}
+                                        </div>
+                                        {existing ? (
+                                            <button 
+                                                className="btn btn-sm btn-primary"
+                                                onClick={() => navigate(`/roadmaps/${existing.id}`)}
+                                            >
+                                                View & Enroll
+                                            </button>
+                                        ) : (
+                                            <button 
+                                                className={`btn btn-sm ${requesting[t] === 'done' ? 'btn-success' : ''}`} 
+                                                disabled={!!requesting[t]}
+                                                onClick={() => handleRequest(t)}
+                                            >
+                                                {requesting[t] === 'loading' ? 'Requesting...' : requesting[t] === 'done' ? 'Requested' : 'Request Admin'}
+                                            </button>
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </div>
                     )}
                 </div>

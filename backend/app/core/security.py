@@ -8,7 +8,7 @@ from jose import JWTError, jwt
 
 from app.core.config import settings
 
-# ── Password Hashing (direct bcrypt — avoids passlib/bcrypt 5.x incompatibility) ─
+
 def hash_password(password: str) -> str:
     """Hash a plain-text password using bcrypt. Returns the hashed string."""
     password_bytes = password.encode("utf-8")

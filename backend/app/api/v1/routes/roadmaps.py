@@ -178,3 +178,33 @@ async def generate_roadmap_with_ai(
     """
     service = AIRoadmapGeneratorService(db)
     return await service.generate_and_save(data, current_user)
+
+
+# ── Roadmap Requests ───────────────────────────────────────────────────────────
+from app.models.models import RoadmapRequest
+from app.schemas.roadmap import RoadmapRequestCreate, RoadmapRequestResponse
+
+@router.post("/request", response_model=RoadmapRequestResponse, status_code=201)
+async def request_roadmap(
+    data: RoadmapRequestCreate,
+    current_user: CurrentUser,
+    db: DB,
+):
+    """Learner: Request a new learning roadmap by title."""
+    req = RoadmapRequest(
+        user_id=current_user.id,
+        title=data.title,
+    )
+    db.add(req)
+    await db.flush()
+    await db.refresh(req)
+
+    return RoadmapRequestResponse(
+        id=req.id,
+        user_id=req.user_id,
+        title=req.title,
+        status=req.status,
+        created_at=req.created_at,
+        user_name=current_user.display_name,
+        user_email=current_user.email,
+    )

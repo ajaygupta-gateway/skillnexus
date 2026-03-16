@@ -470,3 +470,26 @@ class Resume(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="resumes")
+
+
+# ── RoadmapRequest ─────────────────────────────────────────────────────────────
+class RoadmapRequest(Base):
+    """Tracks when a user requests a new roadmap based on resume suggestions."""
+
+    __tablename__ = "roadmap_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(50), default="pending", nullable=False
+    )  # pending | fulfilled | rejected
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    user: Mapped["User"] = relationship(foreign_keys=[user_id])

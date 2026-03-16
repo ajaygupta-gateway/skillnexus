@@ -271,3 +271,57 @@ async def get_user_analytics(
         streak_count=user.streak_count,
         assignments=rows,
     )
+
+
+# ── Roadmap Requests ───────────────────────────────────────────────────────────
+from app.models.models import RoadmapRequest
+
+@router.get("/roadmap-requests", response_model=list[dict])
+async def get_roadmap_requests(
+    _: AdminOrManager,
+    db: DB,
+):
+    """Admin/Manager: Get all pending user roadmap requests."""
+    from sqlalchemy import select
+    from app.models.models import User
+    
+    # Query requests joining with users to get email
+    stmt = select(RoadmapRequest, User).join(User, RoadmapRequest.user_id == User.id).where(
+        RoadmapRequest.status == "pending"
+    ).order_by(RoadmapRequest.created_at.desc())
+    
+    results = await db.execute(stmt)
+    
+    response = []
+    for req, user in results:
+        response.append({
+            "id": req.id,
+            "user_id": req.user_id,
+            "title": req.title,
+            "status": req.status,
+            "created_at": req.created_at,
+            "user_email": user.email,
+            "user_name": user.display_name,
+        })
+        
+    return response
+
+@router.patch("/roadmap-requests/{request_id}", response_model=MessageResponse)
+async def update_roadmap_request(
+    request_id: uuid.UUID,
+    data: dict,
+    _: AdminOrManager,
+    db: DB,
+):
+    """Admin/Manager: Update status of a roadmap request (e.g. fulfilled or rejected)."""
+    from app.core.exceptions import NotFoundException
+    
+    req = await db.get(RoadmapRequest, request_id)
+    if not req:
+        raise NotFoundException("Roadmap Request")
+        
+    if "status" in data:
+        req.status = data["status"]
+        
+    await db.commit()
+    return MessageResponse(message="Request updated successfully")

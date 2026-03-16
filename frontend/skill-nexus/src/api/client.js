@@ -70,6 +70,7 @@ export const roadmapApi = {
   updateNode: (rid, nid, d) => api.patch(`/roadmaps/${rid}/nodes/${nid}`, d),
   deleteNode: (rid, nid) => api.delete(`/roadmaps/${rid}/nodes/${nid}`),
   enroll: (id) => api.post(`/progress/roadmaps/${id}/enroll`),
+  requestRoadmap: (title) => api.post('/roadmaps/request', { title }),
 };
 
 // Progress
@@ -106,6 +107,8 @@ export const adminApi = {
   dashboard: () => api.get('/admin/analytics/dashboard'),
   skillGaps: (p) => api.get('/admin/analytics/skill-gaps', { params: p }),
   userAnalytics: (uid) => api.get(`/admin/analytics/users/${uid}`),
+  getRoadmapRequests: () => api.get('/admin/roadmap-requests'),
+  updateRoadmapRequest: (id, d) => api.patch(`/admin/roadmap-requests/${id}`, d),
 };
 
 // Resume

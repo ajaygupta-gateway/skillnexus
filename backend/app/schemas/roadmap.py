@@ -93,3 +93,15 @@ class GenerateRoadmapRequest(BaseSchema):
         description='e.g. "Create a roadmap for Senior Java Developer"',
     )
     publish_immediately: bool = False
+
+# ── Roadmap Requests ────────────────────────────────────────────────────────
+class RoadmapRequestCreate(BaseSchema):
+    title: str = Field(min_length=1, max_length=200)
+
+class RoadmapRequestResponse(UUIDMixin, BaseSchema):
+    user_id: uuid.UUID
+    title: str
+    status: str
+    created_at: datetime
+    user_email: str | None = None
+    user_name: str | None = None

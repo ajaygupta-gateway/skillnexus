@@ -4,7 +4,7 @@ Chat Service — AI Tutor with persistent per-node chat history and quiz generat
 Prompt Strategy:
 - System prompt contextualizes the AI as an expert corporate trainer
   anchored to the specific node being viewed.
-- Chat history (last 20 messages) is loaded from DB and passed to LLM
+- Chat history (last 5 messages) is loaded from DB and passed to LLM
   as LangChain message objects for full conversation continuity.
 - Quiz generation uses structured output (Pydantic) to guarantee parseable JSON.
 """
@@ -163,9 +163,9 @@ class ChatService:
         system_prompt = self._build_system_prompt(node.title, roadmap_title)
         lc_messages = [SystemMessage(content=system_prompt)]
 
-        # Load last 20 messages for context
+        # Load last 5 messages for context
         history = await self.chat_repo.get_recent_messages_for_context(
-            session.id, limit=20
+            session.id, limit=5
         )
         for msg in history:
             if msg.role == ChatRole.user:

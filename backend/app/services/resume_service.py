@@ -5,15 +5,17 @@ Pipeline:
 1. Validate file (PDF only, size limit)
 2. Save to disk
 3. Extract text with pdfminer.six
-4. Call LLM with structured output → ExtractedResumeSchema
-5. Persist results to Resume table
-6. Return extracted data + roadmap suggestions
+4. Sanitize text to remove personal details (phone, address, email)
+5. Call LLM with structured output → ExtractedResumeSchema
+6. Persist results to Resume table
+7. Return extracted data + roadmap suggestions
 """
 
 import os
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+import logging
 
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,6 +70,44 @@ def _extract_text_from_pdf(file_path: str) -> str:
         raise ValueError(f"Failed to extract text from PDF: {str(e)}")
 
 
+def _sanitize_resume_text(text: str) -> str:
+    """Remove personal details (phone numbers and emails) from resume text."""
+    import re
+
+    phone_patterns = [
+        r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b",  # 123-456-7890 or 123.456.7890 or 1234567890
+        r"\b\d{1,3}[-.]?\d{3}[-.]?\d{3}[-.]?\d{4}\b",  # international with country code
+        r"\(\d{3}\)\s*\d{3}[-.]?\d{4}",  # (123) 456-7890
+    ]
+    email_pattern = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
+
+    original_length = len(text)
+    
+    # 1. Count before replacing
+    phones_found = sum(len(re.findall(p, text)) for p in phone_patterns)
+    emails_found = len(re.findall(email_pattern, text))
+    
+    # 2. Sequential replacement
+    sanitized_text = text
+    for pattern in phone_patterns:
+        sanitized_text = re.sub(pattern, "[PHONE REMOVED]", sanitized_text)
+    sanitized_text = re.sub(email_pattern, "[EMAIL REMOVED]", sanitized_text)
+
+    sanitized_length = len(sanitized_text)
+
+    # 3. Logging
+    logging.info(
+        f"PII Sanitization complete. Phones: {phones_found}, Emails: {emails_found}"
+    )
+    
+    if phones_found > 0 or emails_found > 0:
+        logging.info(f"Text length reduced from {original_length} to {sanitized_length} chars.")
+    else:
+        logging.info("No phone numbers or emails detected in resume text.")
+
+    return sanitized_text
+
+
 class ResumeService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -111,7 +151,8 @@ class ResumeService:
         # ── Extract text ───────────────────────────────────────────────────────
         try:
             raw_text = _extract_text_from_pdf(str(file_path))
-            resume.raw_text = raw_text
+            sanitized_text = _sanitize_resume_text(raw_text)
+            resume.raw_text = sanitized_text  # Store sanitized text
         except Exception as e:
             resume.processing_status = "failed"
             self.db.add(resume)
@@ -122,7 +163,7 @@ class ResumeService:
         try:
             extraction_prompt = (
                 f"Analyze the following resume text and extract structured information.\n\n"
-                f"RESUME TEXT:\n{raw_text[:8000]}\n\n"  # Cap at 8K chars to stay within context
+                f"RESUME TEXT:\n{sanitized_text[:8000]}\n\n"  # Cap at 8K chars to stay within context
                 f"Extract: skills list, years of experience, current role, "
                 f"and suggest 3-5 relevant learning roadmaps for this candidate."
             )
