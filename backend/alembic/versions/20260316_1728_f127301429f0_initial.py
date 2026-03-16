@@ -1,8 +1,8 @@
-"""initial change
+"""Initial
 
-Revision ID: 5424169fdb63
+Revision ID: f127301429f0
 Revises: 
-Create Date: 2026-03-16 11:57:51.357950
+Create Date: 2026-03-16 17:28:21.016696
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '5424169fdb63'
+revision: str = 'f127301429f0'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -80,6 +80,16 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_resumes_user_id'), 'resumes', ['user_id'], unique=False)
+    op.create_table('roadmap_requests',
+    sa.Column('id', sa.UUID(), nullable=False),
+    sa.Column('user_id', sa.UUID(), nullable=False),
+    sa.Column('title', sa.String(length=200), nullable=False),
+    sa.Column('status', sa.String(length=50), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_roadmap_requests_user_id'), 'roadmap_requests', ['user_id'], unique=False)
     op.create_table('roadmaps',
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('title', sa.String(length=200), nullable=False),
@@ -190,6 +200,8 @@ def downgrade() -> None:
     op.drop_table('roadmap_nodes')
     op.drop_index(op.f('ix_roadmaps_title'), table_name='roadmaps')
     op.drop_table('roadmaps')
+    op.drop_index(op.f('ix_roadmap_requests_user_id'), table_name='roadmap_requests')
+    op.drop_table('roadmap_requests')
     op.drop_index(op.f('ix_resumes_user_id'), table_name='resumes')
     op.drop_table('resumes')
     op.drop_index(op.f('ix_refresh_tokens_user_id'), table_name='refresh_tokens')

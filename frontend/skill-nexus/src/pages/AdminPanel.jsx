@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { adminApi, userApi, roadmapApi } from '../api/client';
 import { useAuth } from '../context/AuthContext';
-import { UserPlus, BarChart2, AlertTriangle, Users } from 'lucide-react';
+import { UserPlus, BarChart2, Users, Activity } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 function AssignModal({ users, roadmaps, onClose, onAssigned }) {
@@ -38,7 +38,7 @@ function AssignModal({ users, roadmaps, onClose, onAssigned }) {
                     <div className="form-group">
                         <label>Users (select one or more)</label>
                         <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 7, maxHeight: 180, overflowY: 'auto', padding: 8 }}>
-                            {users.map(u => (
+                            {users.filter(u => u.role === 'learner').map(u => (
                                 <label key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 4px', cursor: 'pointer', fontSize: 13 }}>
                                     <input type="checkbox" checked={form.user_ids.includes(u.id)} onChange={() => toggle(u.id)} />
                                     {u.display_name} <span className="text-muted">({u.email})</span>
@@ -75,6 +75,10 @@ export default function AdminPanel() {
     const [showAssign, setShowAssign] = useState(false);
     const [loading, setLoading] = useState(true);
     const [generatingReq, setGeneratingReq] = useState(null);
+
+    const [selectedUserId, setSelectedUserId] = useState('');
+    const [userAnalytics, setUserAnalytics] = useState(null);
+    const [loadingAnalytics, setLoadingAnalytics] = useState(false);
 
     const isManager = user?.role === 'manager';
     const userNameById = Object.fromEntries(users.map(u => [u.id, u.display_name]));
@@ -132,8 +136,19 @@ export default function AdminPanel() {
         }
     };
 
-
     useEffect(() => { load(); }, []);
+
+    useEffect(() => {
+        if (!selectedUserId) {
+            setUserAnalytics(null);
+            return;
+        }
+        setLoadingAnalytics(true);
+        adminApi.userAnalytics(selectedUserId)
+            .then(res => setUserAnalytics(res.data))
+            .catch(() => setUserAnalytics(null))
+            .finally(() => setLoadingAnalytics(false));
+    }, [selectedUserId]);
 
     const removeAssignment = async (id) => {
         if (!window.confirm('Remove assignment?')) return;
@@ -164,9 +179,9 @@ export default function AdminPanel() {
 
                     {/* Tabs */}
                     <div style={{ display: 'flex', gap: 4, marginBottom: 20 }}>
-                        {['assignments', 'requests'].map(t => (
+                        {['assignments', 'requests', 'user-analytics'].map(t => (
                             <button key={t} className={`btn btn-sm ${tab === t ? 'btn-primary' : 'btn-ghost'}`} style={{ textTransform: 'capitalize' }} onClick={() => setTab(t)}>
-                                {t === 'assignments' ? <><Users size={13} /> Assignments</> : <><Users size={13} /> Requests</>}
+                                {t === 'assignments' ? <><Users size={13} /> Assignments</> : t === 'requests' ? <><Users size={13} /> Requests</> : <><Activity size={13} /> User Analytics</>}
                             </button>
                         ))}
                     </div>
@@ -240,6 +255,62 @@ export default function AdminPanel() {
                                     }
                                 </tbody>
                             </table>
+                        </div>
+                    )}
+
+                    {/* User Analytics */}
+                    {tab === 'user-analytics' && (
+                        <div>
+                            <div className="form-group" style={{ maxWidth: 400, marginBottom: 24 }}>
+                                <label>Select Learner</label>
+                                <select className="input" value={selectedUserId} onChange={e => setSelectedUserId(e.target.value)}>
+                                    <option value="">-- Choose a user --</option>
+                                    {users.filter(u => u.role === 'learner').map(u => <option key={u.id} value={u.id}>{u.display_name} ({u.email})</option>)}
+                                </select>
+                            </div>
+
+                            {loadingAnalytics ? <div style={{ padding: 40, textAlign: 'center' }}><div className="spinner" /></div>
+                                : userAnalytics ? (
+                                    <div className="card">
+                                        <h2 style={{ marginBottom: 16 }}>{userAnalytics.display_name} <span style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 400 }}>{userAnalytics.email}</span></h2>
+                                        
+                                        <div className="stats-row" style={{ marginBottom: 24 }}>
+                                            <div className="stat-card"><div className="value" style={{ color: 'var(--primary)' }}>{userAnalytics.level}</div><div className="label">Level</div></div>
+                                            <div className="stat-card"><div className="value text-success">{userAnalytics.xp_balance}</div><div className="label">Total XP</div></div>
+                                            <div className="stat-card"><div className="value" style={{ color: 'var(--warn)' }}>{userAnalytics.streak_count} 🔥</div><div className="label">Streak</div></div>
+                                            <div className="stat-card"><div className="value">{userAnalytics.assignments?.length || 0}</div><div className="label">Assignments</div></div>
+                                        </div>
+
+                                        <h3 style={{ fontSize: 16, marginBottom: 12 }}>Roadmap Progress</h3>
+                                        <div className="table-wrap">
+                                            <table>
+                                                <thead><tr><th>Roadmap</th><th>Status</th><th>Progress</th><th>Last Active</th></tr></thead>
+                                                <tbody>
+                                                    {!userAnalytics.assignments || userAnalytics.assignments.length === 0
+                                                        ? <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--muted)' }}>No assignments.</td></tr>
+                                                        : userAnalytics.assignments.map(a => (
+                                                            <tr key={a.roadmap_id}>
+                                                                <td style={{ fontWeight: 500 }}>{a.assigned_roadmap}</td>
+                                                                <td><span className={`badge badge-${a.status === 'active' ? 'primary' : a.status === 'completed' ? 'success' : 'muted'}`}>{a.status}</span></td>
+                                                                <td>
+                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                                        <div className="progress-bar" style={{ width: 80 }}>
+                                                                            <div className="progress-bar-fill" style={{ width: `${a.completion_percentage || 0}%` }} />
+                                                                        </div>
+                                                                        <span style={{ fontSize: 12 }}>{(a.completion_percentage || 0).toFixed(0)}%</span>
+                                                                    </div>
+                                                                </td>
+                                                                <td className="text-muted" style={{ fontSize: 13 }}>{a.last_active_at ? new Date(a.last_active_at).toLocaleDateString() : '—'}</td>
+                                                            </tr>
+                                                        ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    selectedUserId && !loadingAnalytics && <div className="text-muted">Failed to load or no data.</div>
+                                )
+                            }
                         </div>
                     )}
                 </>
