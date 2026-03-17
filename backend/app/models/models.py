@@ -22,11 +22,14 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+select
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, column_property
 
 from app.core.database import Base
+from sqlalchemy.testing.pickleable import User
+from sqlalchemy.sql.functions import coalesce
 
 
 # ── Enums ─────────────────────────────────────────────────────────────────────
@@ -63,6 +66,43 @@ class ChatRole(str, enum.Enum):
     system = "system"
 
 
+
+
+
+# ── PointTransaction ──────────────────────────────────────────────────────────
+class PointTransaction(Base):
+    """Event-based XP ledger. Append-only. Cached sum lives on User.xp_balance."""
+
+    __tablename__ = "point_transactions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_name: Mapped[str] = mapped_column(
+        String(100), nullable=False
+    )
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)  # Can be negative
+    event_type: Mapped[PointEventType] = mapped_column(
+        Enum(PointEventType, name="point_event_type"), nullable=False
+    )
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reference_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )  # e.g., node_id or roadmap_id
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    user: Mapped["User"] = relationship(back_populates="point_transactions")
+
+    __table_args__ = (
+        Index("ix_point_transactions_user_created", "user_id", "created_at"),
+    )
+
+
 # ── User ──────────────────────────────────────────────────────────────────────
 class User(Base):
     __tablename__ = "users"
@@ -79,7 +119,16 @@ class User(Base):
     current_role_title: Mapped[str | None] = mapped_column(String(150), nullable=True)
 
     # Gamification — cached balance for fast leaderboard queries
-    xp_balance: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # xp_balance: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  #de-normalized method
+
+    #normalized method
+    xp_balance = column_property(   #Add a computed field to the model. It’s NOT a real DB column. It’s calculated every time you query the user
+        select(coalesce(func.sum(PointTransaction.amount), 0))  #If SUM is NULL → return 0
+        .where(PointTransaction.user_id == id)
+        .correlate_except(PointTransaction) #link to outer user query
+        .scalar_subquery() #make it usable as a column
+    )
+
     level: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
     # Streak tracking
@@ -146,39 +195,6 @@ class RefreshToken(Base):
 
     user: Mapped["User"] = relationship(back_populates="refresh_tokens")
 
-
-# ── PointTransaction ──────────────────────────────────────────────────────────
-class PointTransaction(Base):
-    """Event-based XP ledger. Append-only. Cached sum lives on User.xp_balance."""
-
-    __tablename__ = "point_transactions"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    user_name: Mapped[str] = mapped_column(
-        String(100), nullable=False
-    )
-    amount: Mapped[int] = mapped_column(Integer, nullable=False)  # Can be negative
-    event_type: Mapped[PointEventType] = mapped_column(
-        Enum(PointEventType, name="point_event_type"), nullable=False
-    )
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    reference_id: Mapped[str | None] = mapped_column(
-        String(255), nullable=True
-    )  # e.g., node_id or roadmap_id
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-
-    user: Mapped["User"] = relationship(back_populates="point_transactions")
-
-    __table_args__ = (
-        Index("ix_point_transactions_user_created", "user_id", "created_at"),
-    )
 
 
 # ── Roadmap ────────────────────────────────────────────────────────────────────

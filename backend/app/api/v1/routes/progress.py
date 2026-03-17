@@ -55,7 +55,6 @@ async def update_node_progress(
 
     Security: User must be assigned to this roadmap.
     Strict Mode: 'done' only allowed if quiz has been passed.
-    XP: Completing a node for the first time awards 50 XP.
     """
     service = ProgressService(db)
     return await service.update_node_progress(

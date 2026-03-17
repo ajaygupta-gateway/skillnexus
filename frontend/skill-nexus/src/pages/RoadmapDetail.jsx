@@ -936,8 +936,8 @@ export default function RoadmapDetail() {
             await roadmapApi.deleteNode(id, node.id);
             const updated = flatNodes.filter(n => n.id !== node.id);
             setFlatNodes(updated);
+            setSelectedNode(null);
             rebuildGraph(updated, progressMap, quizPassedMap, null);
-            handleCloseSidebar();
         } catch (err) { alert(err.response?.data?.detail || 'Error'); }
     };
 

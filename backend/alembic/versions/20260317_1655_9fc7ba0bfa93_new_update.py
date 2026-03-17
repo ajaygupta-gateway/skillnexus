@@ -1,8 +1,8 @@
-"""Initial
+"""new_update
 
-Revision ID: f127301429f0
+Revision ID: 9fc7ba0bfa93
 Revises: 
-Create Date: 2026-03-16 17:28:21.016696
+Create Date: 2026-03-17 16:55:06.617889
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = 'f127301429f0'
+revision: str = '9fc7ba0bfa93'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -27,7 +27,6 @@ def upgrade() -> None:
     sa.Column('display_name', sa.String(length=100), nullable=False),
     sa.Column('role', sa.Enum('learner', 'admin', 'manager', name='user_role'), nullable=False),
     sa.Column('current_role_title', sa.String(length=150), nullable=True),
-    sa.Column('xp_balance', sa.Integer(), nullable=False),
     sa.Column('level', sa.Integer(), nullable=False),
     sa.Column('streak_count', sa.Integer(), nullable=False),
     sa.Column('last_login_date', sa.DateTime(timezone=True), nullable=True),

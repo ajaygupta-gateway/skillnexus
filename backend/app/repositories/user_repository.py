@@ -81,11 +81,11 @@ class UserRepository:
         self.db.add(transaction)
 
         # Update cached balance
-        await self.db.execute(
-            update(User)
-            .where(User.id == user_id)
-            .values(xp_balance=User.xp_balance + amount)
-        )
+        # await self.db.execute(
+        #     update(User)
+        #     .where(User.id == user_id)
+        #     .values(xp_balance=User.xp_balance + amount)
+        # )
 
         await self.db.flush()
         return transaction
