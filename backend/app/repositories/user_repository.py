@@ -68,8 +68,7 @@ class UserRepository:
         description: str | None = None,
         reference_id: str | None = None,
     ) -> PointTransaction:
-        """Append a XP event to ledger and update the cached xp_balance."""
-        # Create ledger entry
+        """Append a XP event to ledger. xp_balance is a column_property — no separate update needed."""
         transaction = PointTransaction(
             user_id=user_id,
             user_name=user_name,
@@ -79,23 +78,27 @@ class UserRepository:
             reference_id=reference_id,
         )
         self.db.add(transaction)
-
-        # Update cached balance
-        # await self.db.execute(
-        #     update(User)
-        #     .where(User.id == user_id)
-        #     .values(xp_balance=User.xp_balance + amount)
-        # )
-
         await self.db.flush()
         return transaction
 
     async def update_level(self, user: User) -> None:
-        """Recalculate level from xp_balance (every 500 XP = 1 level)."""
-        new_level = max(1, (user.xp_balance // 500) + 1)
-        if new_level != user.level:
-            user.level = new_level
-            self.db.add(user)
+        """
+        Recalculate level from actual XP earned (every 500 XP = 1 level).
+        
+        We do NOT access user.xp_balance directly because it is a column_property
+        (scalar subquery) that async SQLAlchemy cannot lazy-load — doing so raises
+        MissingGreenlet. Instead we issue an explicit async SUM query.
+        """
+        result = await self.db.execute(
+            select(func.coalesce(func.sum(PointTransaction.amount), 0))
+            .where(PointTransaction.user_id == user.id)
+        )
+        total_xp: int = result.scalar_one()
+        new_level = max(1, (total_xp // 500) + 1)
+        if user.level != new_level:
+            await self.db.execute(
+                update(User).where(User.id == user.id).values(level=new_level)
+            )
             await self.db.flush()
 
     async def update_streak(self, user: User) -> dict:

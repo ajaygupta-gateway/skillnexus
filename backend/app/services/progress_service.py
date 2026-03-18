@@ -251,6 +251,132 @@ class ProgressService:
             node_statuses=node_statuses,
         )
 
+    # ── Helper: recursively auto-complete parent nodes ────────────────────────
+    async def _auto_complete_parents(
+        self,
+        user_id: uuid.UUID,
+        roadmap_id: uuid.UUID,
+        child_node_id: uuid.UUID,
+    ) -> None:
+        """
+        After a child node is marked done, walk up the tree and auto-complete
+        any parent whose ALL children are now done.  This runs in the SAME
+        DB transaction so there are no silent failures or race conditions.
+        """
+        from sqlalchemy import select as sa_select, func as sa_func
+        from app.models.models import RoadmapNode as RNModel
+        from app.models.models import UserNodeProgress as UNPModel
+
+        child = await self.roadmap_repo.get_node_by_id(child_node_id)
+        if not child or not child.parent_id:
+            return  # No parent to auto-complete (root node)
+
+        parent = await self.roadmap_repo.get_node_by_id(child.parent_id)
+        if not parent:
+            return
+
+        # Check if parent is already done
+        parent_progress = await self.repo.get_node_progress(user_id, parent.id)
+        if parent_progress and parent_progress.status == NodeStatus.done:
+            return  # Already done, nothing to do
+
+        # Count total children of this parent
+        total_children_result = await self.db.execute(
+            sa_select(sa_func.count(RNModel.id)).where(
+                RNModel.roadmap_id == roadmap_id,
+                RNModel.parent_id == parent.id,
+            )
+        )
+        total_children = total_children_result.scalar_one()
+
+        # Count how many children of this parent are done by this user
+        done_children_result = await self.db.execute(
+            sa_select(sa_func.count(RNModel.id))
+            .join(UNPModel, RNModel.id == UNPModel.node_id)
+            .where(
+                RNModel.roadmap_id == roadmap_id,
+                RNModel.parent_id == parent.id,
+                UNPModel.user_id == user_id,
+                UNPModel.status == NodeStatus.done,
+            )
+        )
+        done_children = done_children_result.scalar_one()
+
+        if done_children >= total_children:
+            # All children done → auto-complete the parent
+            await self.repo.upsert_node_progress(
+                user_id=user_id,
+                node_id=parent.id,
+                roadmap_id=roadmap_id,
+                status=NodeStatus.done,
+                quiz_passed=True,  # Parent auto-completed, treat quiz as bypassed
+            )
+            # Recurse upward (parent of parent)
+            await self._auto_complete_parents(user_id, roadmap_id, parent.id)
+
+    # ── Helper: check and award XP when all root nodes are done ─────────────
+    async def _check_and_award_roadmap_xp(
+        self,
+        user_id: uuid.UUID,
+        roadmap_id: uuid.UUID,
+    ) -> None:
+        """
+        Award XP when ALL root nodes are completed.
+        Called once after all auto-completion is finished.
+        """
+        from app.core.config import settings
+        from sqlalchemy import select as sa_select, func as sa_func
+        from app.models.models import RoadmapNode as _RNModel
+        from app.models.models import UserNodeProgress as _UNPModel
+
+        # Count total root nodes
+        root_count_result = await self.db.execute(
+            sa_select(sa_func.count(_RNModel.id)).where(
+                _RNModel.roadmap_id == roadmap_id,
+                _RNModel.parent_id.is_(None),
+            )
+        )
+        root_count = root_count_result.scalar_one() or 1
+
+        # Count completed root nodes for this user
+        done_root_result = await self.db.execute(
+            sa_select(sa_func.count(_RNModel.id))
+            .join(_UNPModel, _RNModel.id == _UNPModel.node_id)
+            .where(
+                _RNModel.roadmap_id == roadmap_id,
+                _RNModel.parent_id.is_(None),
+                _UNPModel.user_id == user_id,
+                _UNPModel.status == NodeStatus.done,
+            )
+        )
+        done_root_count = done_root_result.scalar_one() or 0
+
+        if done_root_count >= root_count:
+            # Check if XP was already awarded for this roadmap
+            from app.models.models import PointTransaction
+            existing_award = await self.db.execute(
+                sa_select(sa_func.count(PointTransaction.id)).where(
+                    PointTransaction.user_id == user_id,
+                    PointTransaction.event_type == PointEventType.roadmap_complete,
+                    PointTransaction.reference_id == str(roadmap_id),
+                )
+            )
+            already_awarded = (existing_award.scalar_one() or 0) > 0
+            if already_awarded:
+                return  # Don't double-award
+
+            user = await self.user_repo.get_by_id(user_id)
+            if user:
+                await self.user_repo.add_xp(
+                    user_id=user_id,
+                    user_name=user.display_name,
+                    amount=settings.XP_NODE_COMPLETE,
+                    event_type=PointEventType.roadmap_complete,
+                    description="Completed all foundations of roadmap!",
+                    reference_id=str(roadmap_id),
+                )
+                await self.user_repo.update_level(user)
+
     async def update_node_progress(
         self,
         user_id: uuid.UUID,
@@ -281,7 +407,6 @@ class ProgressService:
                 parent_node = await self.roadmap_repo.get_node_by_id(node.parent_id)
 
                 # Check whether the parent is a "section header" (has other children).
-                # We detect this by finding sibling nodes that share the same parent_id.
                 from sqlalchemy import select as sa_select
                 from app.models.models import RoadmapNode as RNModel
                 siblings_result = await self.db.execute(
@@ -294,15 +419,11 @@ class ProgressService:
                 siblings = siblings_result.scalars().all()
 
                 if siblings:
-                    # Parent has multiple children → it's a section header.
-                    # First child: only require parent to be in_progress (enrolled).
-                    # Subsequent children: require previous sibling done+quiz_passed.
                     prev_siblings = [
                         s for s in siblings
                         if (s.order_index or 0) < (node.order_index or 0)
                     ]
                     if not prev_siblings:
-                        # First child of section: parent in_progress is enough
                         parent_progress = await self.repo.get_node_progress(user_id, node.parent_id)
                         if not parent_progress or parent_progress.status not in (
                             NodeStatus.in_progress, NodeStatus.done
@@ -311,7 +432,6 @@ class ProgressService:
                                 "You must start this section before accessing its first topic"
                             )
                     else:
-                        # Subsequent child: previous sibling must be done + quiz_passed
                         prev_sibling = max(prev_siblings, key=lambda s: s.order_index or 0)
                         prev_progress = await self.repo.get_node_progress(user_id, prev_sibling.id)
                         if not prev_progress or prev_progress.status != NodeStatus.done:
@@ -321,8 +441,6 @@ class ProgressService:
                         if not prev_progress.quiz_passed:
                             raise QuizRequiredException()
                 else:
-                    # Only child (or parent is a leaf node itself).
-                    # Require parent to be done + quiz_passed.
                     parent_progress = await self.repo.get_node_progress(user_id, node.parent_id)
                     if not parent_progress or parent_progress.status != NodeStatus.done:
                         raise BadRequestException(
@@ -330,7 +448,6 @@ class ProgressService:
                         )
                     if not parent_progress.quiz_passed:
                         raise QuizRequiredException()
-            # For root nodes, always allow unlocking if enrolled
 
         # Strict Mode: cannot mark done without quiz_passed (only if transitioning to done)
         if status == NodeStatus.done and assignment.strict_mode:
@@ -338,13 +455,7 @@ class ProgressService:
                 if not bypass_quiz:
                     raise QuizRequiredException()
 
-        is_newly_done = False
-        if not existing_progress or existing_progress.status != NodeStatus.done:
-            is_newly_done = status == NodeStatus.done
-
         # Preserve existing quiz_passed=True even when bypass_quiz=False.
-        # mark_quiz_passed() may have already set quiz_passed=True (via submit_quiz)
-        # so we must not overwrite it back to False here.
         existing_quiz_passed = existing_progress.quiz_passed if existing_progress else False
         effective_quiz_passed = existing_quiz_passed or bypass_quiz
 
@@ -356,49 +467,12 @@ class ProgressService:
             quiz_passed=effective_quiz_passed if status == NodeStatus.done else False,
         )
 
-        # Award XP only when ALL root nodes (parent_id is None) are completed.
-        # Ensure it is awarded only once upon the final root node completion.
-        if is_newly_done and node.parent_id is None:
-            from app.core.config import settings
-            from sqlalchemy import select as sa_select, func as sa_func
-            from app.models.models import RoadmapNode as _RNModel
-            from app.models.models import UserNodeProgress as _UNPModel
-            from app.models.models import NodeStatus as _NS
+        # ── Auto-complete parent nodes if all children are done ────────────
+        if status == NodeStatus.done:
+            await self._auto_complete_parents(user_id, roadmap_id, node_id)
 
-            # Count total root nodes
-            root_count_result = await self.db.execute(
-                sa_select(sa_func.count(_RNModel.id)).where(
-                    _RNModel.roadmap_id == roadmap_id,
-                    _RNModel.parent_id.is_(None),
-                )
-            )
-            root_count = root_count_result.scalar_one() or 1
-
-            # Count completed root nodes for this user
-            done_root_result = await self.db.execute(
-                sa_select(sa_func.count(_RNModel.id)).join(
-                    _UNPModel, _RNModel.id == _UNPModel.node_id
-                ).where(
-                    _RNModel.roadmap_id == roadmap_id,
-                    _RNModel.parent_id.is_(None),
-                    _UNPModel.user_id == user_id,
-                    _UNPModel.status == _NS.done
-                )
-            )
-            done_root_count = done_root_result.scalar_one() or 0
-
-            if done_root_count == root_count:
-                user = await self.user_repo.get_by_id(user_id)
-                if user:
-                    await self.user_repo.add_xp(
-                        user_id=user_id,
-                        user_name=user.display_name,
-                        amount=settings.XP_NODE_COMPLETE,
-                        event_type=PointEventType.roadmap_complete,
-                        description=f"Completed all foundations of roadmap!",
-                        reference_id=str(roadmap_id),
-                    )
-                    await self.user_repo.update_level(user)
+            # Check and award XP AFTER all parent auto-completion is finished
+            await self._check_and_award_roadmap_xp(user_id, roadmap_id)
 
         # Recalculate assignment completion percentage
         await self.repo.recalculate_completion(user_id, roadmap_id)

@@ -41,7 +41,7 @@ def upgrade() -> None:
     sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('user_name', sa.String(length=100), nullable=False),
     sa.Column('amount', sa.Integer(), nullable=False),
-    sa.Column('event_type', sa.Enum('node_complete', 'login', 'streak_bonus', 'quiz_pass', 'resume_upload', 'manual_award', name='point_event_type'), nullable=False),
+    sa.Column('event_type', sa.Enum('node_complete', 'roadmap_complete', 'login', 'streak_bonus', 'quiz_pass', 'resume_upload', 'manual_award', name='point_event_type'), nullable=False),
     sa.Column('description', sa.Text(), nullable=True),
     sa.Column('reference_id', sa.String(length=255), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),

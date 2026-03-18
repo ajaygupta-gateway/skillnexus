@@ -28,9 +28,11 @@ npm run dev
 
 ---
 
-## 🟡 Restart Backend Only (after Python code changes)
+## 🟡 Restart Backend Only (after Python code changes OR .env changes)
 
-Use this after editing any `.py` file in `backend/app/`.
+Use this after:
+- Editing any `.py` file in `backend/app/`
+- Changing **any value in `.env`** (API keys, secrets, config) — `.env` is loaded at container startup, so a restart picks up the new values automatically. No rebuild needed.
 
 ```powershell
 cd C:\Users\ajayg\Desktop\skillnexus\backend

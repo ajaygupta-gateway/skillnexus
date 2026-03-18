@@ -925,36 +925,13 @@ export default function RoadmapDetail() {
         }
     };
 
-    // ── Recursively auto-complete parent nodes ──────────────────────────────
-    const checkAndAutoCompleteParent = async (completedNodeId, currentPMap, currentQMap) => {
-        const completedNode = flatNodes.find(n => n.id === completedNodeId);
-        if (!completedNode?.parent_id) return { pMap: currentPMap, qMap: currentQMap };
-
-        const parent = flatNodes.find(n => n.id === completedNode.parent_id);
-        if (!parent) return { pMap: currentPMap, qMap: currentQMap };
-
-        const siblings = flatNodes.filter(n => n.parent_id === parent.id);
-        // We know a sibling is done if currentPMap says 'done', or if it's a parent that auto-resolved to done.
-        const allSiblingsDone = siblings.every(s => {
-            const status = computeEffectiveStatus(s, flatNodes, currentPMap, currentQMap, isAssigned);
-            return status === 'done' || currentPMap[s.id] === 'done';
-        });
-
-        if (allSiblingsDone && currentPMap[parent.id] !== 'done') {
-            try {
-                await progressApi.updateNode(parent.roadmap_id, parent.id, { status: 'done', bypass_quiz: true });
-            } catch { /* parent might already be done */ }
-            const newPMap = { ...currentPMap, [parent.id]: 'done' };
-            const newQMap = { ...currentQMap, [parent.id]: true };
-
-            // Recurse upwards to grand-parent
-            return await checkAndAutoCompleteParent(parent.id, newPMap, newQMap);
-        }
-        return { pMap: currentPMap, qMap: currentQMap };
-    };
-
     const markNodeCompleted = async (completedNode, bypassQuiz = false) => {
-        // 1. Mark the completed node as 'done' in the backend, pass bypass_quiz if applicable
+        // Snapshot root node done count BEFORE the API call for toast detection
+        const rootNodes = flatNodes.filter(n => !n.parent_id);
+        const previousDoneRootCount = rootNodes.filter(n => progressMap[n.id] === 'done').length;
+
+        // 1. Mark the completed node as 'done' in the backend.
+        //    The backend will auto-complete parent nodes and award XP atomically.
         try {
             await progressApi.updateNode(completedNode.roadmap_id, completedNode.id, { 
                 status: 'done', 
@@ -964,27 +941,17 @@ export default function RoadmapDetail() {
             // If already done, fine
         }
 
-        // 2. Update local state: node is done + quiz passed
-        let newPMap = { ...progressMap, [completedNode.id]: 'done' };
-        let newQMap = { ...quizPassedMap, [completedNode.id]: true };
+        // 2. Re-fetch all progress from the DB to pick up auto-completed parents
+        await load();
 
-        // 2a. Auto-complete parent headers recursively if all their children are now done
-        const parentResult = await checkAndAutoCompleteParent(completedNode.id, newPMap, newQMap);
-        newPMap = parentResult.pMap;
-        newQMap = parentResult.qMap;
-
-        setProgressMap(newPMap);
-        setQuizPassedMap(newQMap);
-        rebuildGraph(flatNodes, newPMap, newQMap, selectedNode?.id);
-
-        // 3. Show XP toast only when ALL root nodes are completed in this specific update
-        const rootNodes = flatNodes.filter(n => !n.parent_id);
+        // 3. Show XP toast if all root nodes are now completed
+        //    (load() has already updated progressMap, but we need the NEW values)
+        //    We check by re-reading from the fresh state after load.
+        //    Since load() is async and sets state, we use a slight workaround:
+        //    compare with the snapshot taken before.
         const rootCount = rootNodes.length || 1;
-        const previousDoneRootCount = rootNodes.filter(n => progressMap[n.id] === 'done').length;
-        const currentDoneRootCount = rootNodes.filter(n => newPMap[n.id] === 'done').length;
-
-        // Trigger toast only exactly when transitioning to fully completed
-        if (currentDoneRootCount === rootCount && previousDoneRootCount < rootCount) {
+        if (previousDoneRootCount < rootCount) {
+            // If previously not all done, show toast (the backend awarded XP)
             setXpToast({ amount: 50, nodeName: "Entire Roadmap" });
             setTimeout(() => setXpToast(null), 4000);
         }

@@ -28,7 +28,6 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship, column_property
 
 from app.core.database import Base
-from sqlalchemy.testing.pickleable import User
 from sqlalchemy.sql.functions import coalesce
 
 
@@ -41,6 +40,7 @@ class UserRole(str, enum.Enum):
 
 class PointEventType(str, enum.Enum):
     node_complete = "node_complete"
+    roadmap_complete = "roadmap_complete"
     login = "login"
     streak_bonus = "streak_bonus"
     quiz_pass = "quiz_pass"
