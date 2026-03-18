@@ -228,6 +228,10 @@ class ChatService:
         answers_json = json.dumps(
             {str(q.question_number): q.correct_answer for q in quiz_data.questions}
         )
+        # Delete any previous quiz answer rows before writing the new one.
+        # This prevents duplicate rows if the endpoint is called more than once
+        # (e.g. React StrictMode double-invokes effects in development).
+        await self.chat_repo.delete_quiz_answer_messages(session.id)
         # Store answers as a system message (hidden from user, used for validation)
         await self.chat_repo.add_message(
             session_id=session.id,

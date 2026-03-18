@@ -14,7 +14,9 @@ import { Send, CheckCircle, Clock, Lock, Plus, Trash2, BookOpen, MessageSquare, 
 function flattenTree(nodeList) {
     const result = [];
     function walk(nodes, depth = 0) {
-        for (const node of nodes) {
+        // Sort siblings by order_index so indexing labels are always consistent
+        const sorted = [...nodes].sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0));
+        for (const node of sorted) {
             const { children, ...rest } = node;
             rest.has_children = children && children.length > 0;
             rest._depth = depth;
@@ -276,26 +278,32 @@ function buildGraph(nodes, progressMap, quizPassedMap, isAssigned, selectedId, o
 /* ─── Quiz Modal ─────────────────────────────────────────────────────── */
 function QuizModal({ node, onClose, onPassed }) {
     const [quiz, setQuiz] = useState(null);
-    // quizSel: { [question_number_string]: optionKey }  e.g. { "1": "A", "2": "C", "3": "B" }
     const [quizSel, setQuizSel] = useState({});
     const [quizResult, setQuizResult] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState(false);   // quiz generation failed
+    const [submitError, setSubmitError] = useState('');  // submission error message
     const [submitting, setSubmitting] = useState(false);
 
     useEffect(() => {
+        let cancelled = false;
         setLoading(true);
+        setLoadError(false);
         chatApi.generateQuiz(node.id, node.roadmap_id)
-            .then(r => setQuiz(r.data))
-            .catch(() => alert('Could not generate quiz. Please try again.'))
-            .finally(() => setLoading(false));
+            .then(r => { if (!cancelled) setQuiz(r.data); })
+            .catch(() => { if (!cancelled) setLoadError(true); })
+            .finally(() => { if (!cancelled) setLoading(false); });
+        // Cleanup: if StrictMode re-runs the effect, ignore the first response
+        return () => { cancelled = true; };
     }, [node.id, node.roadmap_id]);
 
     const allAnswered = quiz && Object.keys(quizSel).length >= quiz.questions.length;
 
     const submit = async () => {
+        if (submitting) return; // guard against accidental double-click
         setSubmitting(true);
+        setSubmitError('');
         try {
-            // Build dict: { "1": "A", "2": "C", "3": "B" } — what backend expects
             const answers = {};
             quiz.questions.forEach(q => {
                 answers[String(q.question_number)] = quizSel[String(q.question_number)] || '';
@@ -305,11 +313,11 @@ function QuizModal({ node, onClose, onPassed }) {
             if (r.data.passed) {
                 setTimeout(() => onPassed(), 1800);
             }
-        } catch (err) {
-            const detail = err.response?.data?.detail || 'Submit failed. Please try again.';
-            alert(detail);
+        } catch {
+            setSubmitError('Something went wrong while submitting. Please try again.');
+        } finally {
+            setSubmitting(false);
         }
-        finally { setSubmitting(false); }
     };
 
     return (
@@ -319,14 +327,44 @@ function QuizModal({ node, onClose, onPassed }) {
                     <h2 style={{ margin: 0 }}>🧠 Node Quiz: {node.title}</h2>
                     <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={14} /></button>
                 </div>
-                <p className="text-muted" style={{ fontSize: 13, marginBottom: 16 }}>
-                    Answer atleast 2 questions correctly to unlock the next node.
-                </p>
 
-                {loading && <div className="loading-center"><div className="spinner" /></div>}
+                {/* ── Quiz generation failed ── */}
+                {loadError && (
+                    <div style={{ textAlign: 'center', padding: '24px 0' }}>
+                        <p style={{ fontSize: 32, marginBottom: 12 }}>😔</p>
+                        <p style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Couldn't generate quiz</p>
+                        <p className="text-muted" style={{ fontSize: 13, marginBottom: 20 }}>
+                            We ran into a problem preparing questions for this topic.
+                            Please try again in a moment.
+                        </p>
+                        <div className="modal-footer" style={{ justifyContent: 'center' }}>
+                            <button className="btn btn-ghost" onClick={onClose}>Close</button>
+                            <button className="btn btn-primary" onClick={() => {
+                                setLoadError(false);
+                                setLoading(true);
+                                chatApi.generateQuiz(node.id, node.roadmap_id)
+                                    .then(r => setQuiz(r.data))
+                                    .catch(() => setLoadError(true))
+                                    .finally(() => setLoading(false));
+                            }}>Retry</button>
+                        </div>
+                    </div>
+                )}
 
-                {quiz && !quizResult && (
+                {/* ── Loading spinner ── */}
+                {loading && !loadError && (
+                    <div style={{ textAlign: 'center', padding: '24px 0' }}>
+                        <div className="loading-center"><div className="spinner" /></div>
+                        <p className="text-muted" style={{ fontSize: 13, marginTop: 12 }}>Generating quiz questions…</p>
+                    </div>
+                )}
+
+                {/* ── Quiz questions ── */}
+                {!loading && !loadError && quiz && !quizResult && (
                     <>
+                        <p className="text-muted" style={{ fontSize: 13, marginBottom: 16 }}>
+                            Answer at least 2 questions correctly to unlock the next node.
+                        </p>
                         {quiz.questions.map((q) => {
                             const qKey = String(q.question_number);
                             return (
@@ -344,6 +382,11 @@ function QuizModal({ node, onClose, onPassed }) {
                                 </div>
                             );
                         })}
+                        {submitError && (
+                            <div style={{ background: 'rgba(239,68,68,.1)', border: '1px solid var(--danger)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: 'var(--danger)' }}>
+                                {submitError}
+                            </div>
+                        )}
                         <div className="modal-footer">
                             <button className="btn btn-ghost" onClick={onClose}>Skip for now</button>
                             <button className="btn btn-primary"
@@ -355,6 +398,7 @@ function QuizModal({ node, onClose, onPassed }) {
                     </>
                 )}
 
+                {/* ── Quiz result ── */}
                 {quizResult && (
                     <div style={{
                         background: quizResult.passed ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
@@ -563,14 +607,25 @@ function EditNodeModal({ roadmapId, node, nodes, onClose, onEdited }) {
     const [form, setForm] = useState({ 
         title: node.title || '', 
         description: node.description || '', 
-        parent_id: node.parent_id || '' 
+        parent_id: node.parent_id || '',
+        order_index: node.order_index ?? 0,
     });
+    const [resources, setResources] = useState(
+        Array.isArray(node.resources) ? node.resources.map(r => ({ title: r.title || '', url: r.url || '', type: r.type || 'article' })) : []
+    );
     const [saving, setSaving] = useState(false);
 
     const submit = async (e) => {
         e.preventDefault(); setSaving(true);
         try {
-            const payload = { ...form, parent_id: form.parent_id || null };
+            const validResources = resources.filter(r => r.title.trim() && r.url.trim());
+            const payload = { 
+                title: form.title,
+                description: form.description || null,
+                parent_id: form.parent_id || null,
+                order_index: Number(form.order_index),
+                resources: validResources,
+            };
             const r = await roadmapApi.updateNode(roadmapId, node.id, payload);
             onEdited(r.data);
         } catch (err) { alert(err.response?.data?.detail || 'Error'); }
@@ -579,18 +634,26 @@ function EditNodeModal({ roadmapId, node, nodes, onClose, onEdited }) {
 
     return (
         <div className="modal-overlay" onClick={onClose}>
-            <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal" style={{ maxWidth: 580, maxHeight: '85vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
                 <h2>Edit Node</h2>
                 <form onSubmit={submit}>
-                    <div className="form-group"><label>Title</label><input className="input" required autoFocus value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} /></div>
-                    <div className="form-group"><label>Description</label><textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} /></div>
+                    <div className="form-group"><label>Title <span style={{ color: 'var(--danger)' }}>*</span></label><input className="input" required autoFocus value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} /></div>
+                    <div className="form-group"><label>Description</label><textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} style={{ minHeight: 72 }} /></div>
                     <div className="form-group">
-                        <label>Parent Node (optional)</label>
+                        <label>Parent Node <span className="text-muted" style={{ fontSize: 12 }}>(optional)</span></label>
                         <select value={form.parent_id} onChange={e => setForm(p => ({ ...p, parent_id: e.target.value }))}>
                             <option value="">— Root (no parent) —</option>
                             {nodes.filter(n => n.id !== node.id).map(n => <option key={n.id} value={n.id}>{n.title}</option>)}
                         </select>
                     </div>
+                    <div className="form-group">
+                        <label>Order / Position among siblings</label>
+                        <input className="input" type="number" min="0" value={form.order_index}
+                            onChange={e => setForm(p => ({ ...p, order_index: e.target.value }))}
+                            style={{ width: 90 }}
+                        />
+                    </div>
+                    <ResourceEditor resources={resources} onChange={setResources} />
                     <div className="modal-footer">
                         <button className="btn btn-ghost" type="button" onClick={onClose}>Cancel</button>
                         <button className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save Changes'}</button>
@@ -601,15 +664,68 @@ function EditNodeModal({ roadmapId, node, nodes, onClose, onEdited }) {
     );
 }
 
+/* ─── Resource Row Editor ─────────────────────────────────────────────── */
+function ResourceEditor({ resources, onChange }) {
+    const add = () => onChange([...resources, { title: '', url: '', type: 'article' }]);
+    const remove = (i) => onChange(resources.filter((_, idx) => idx !== i));
+    const update = (i, field, val) => onChange(resources.map((r, idx) => idx === i ? { ...r, [field]: val } : r));
+
+    return (
+        <div className="form-group">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <label style={{ marginBottom: 0 }}>Resources</label>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={add} style={{ fontSize: 12 }}>+ Add Resource</button>
+            </div>
+            {resources.length === 0 && (
+                <p className="text-muted" style={{ fontSize: 12, marginBottom: 4 }}>No resources yet. Click "+ Add Resource" to add links.</p>
+            )}
+            {resources.map((r, i) => (
+                <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto auto', gap: 6, marginBottom: 8, alignItems: 'center' }}>
+                    <input className="input" placeholder="Title" value={r.title} onChange={e => update(i, 'title', e.target.value)} style={{ fontSize: 12, padding: '6px 10px' }} />
+                    <input className="input" placeholder="URL (https://…)" value={r.url} onChange={e => update(i, 'url', e.target.value)} style={{ fontSize: 12, padding: '6px 10px' }} />
+                    <select value={r.type} onChange={e => update(i, 'type', e.target.value)} style={{ fontSize: 12, padding: '6px 8px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)' }}>
+                        <option value="article">Article</option>
+                        <option value="video">Video</option>
+                        <option value="docs">Docs</option>
+                        <option value="course">Course</option>
+                    </select>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => remove(i)} style={{ color: 'var(--danger)', borderColor: 'var(--danger)', padding: '4px 8px' }}>✕</button>
+                </div>
+            ))}
+        </div>
+    );
+}
+
 /* ─── Add Node Modal ─────────────────────────────────────────────────── */
 function AddNodeModal({ roadmapId, nodes, onClose, onAdded }) {
-    const [form, setForm] = useState({ title: '', description: '', parent_id: '' });
+    // Auto-compute order_index: count existing siblings (nodes without a parent, or with same parent)
+    const computeDefaultOrderIndex = (parentId) => {
+        const siblings = nodes.filter(n => (n.parent_id || '') === (parentId || ''));
+        return siblings.length; // next available index (0-based)
+    };
+
+    const [form, setForm] = useState({ title: '', description: '', parent_id: '', order_index: computeDefaultOrderIndex('') });
+    const [resources, setResources] = useState([]);
     const [saving, setSaving] = useState(false);
+
+    // Recompute order_index whenever parent_id changes
+    const handleParentChange = (e) => {
+        const pid = e.target.value;
+        setForm(p => ({ ...p, parent_id: pid, order_index: computeDefaultOrderIndex(pid) }));
+    };
 
     const submit = async (e) => {
         e.preventDefault(); setSaving(true);
         try {
-            const payload = { ...form, parent_id: form.parent_id || null };
+            // Validate resources: title + url are required for each
+            const validResources = resources.filter(r => r.title.trim() && r.url.trim());
+            const payload = {
+                title: form.title,
+                description: form.description || null,
+                parent_id: form.parent_id || null,
+                order_index: Number(form.order_index),
+                resources: validResources,
+            };
             const r = await roadmapApi.addNode(roadmapId, payload);
             onAdded(r.data);
         } catch (err) { alert(err.response?.data?.detail || 'Error'); }
@@ -618,18 +734,27 @@ function AddNodeModal({ roadmapId, nodes, onClose, onAdded }) {
 
     return (
         <div className="modal-overlay" onClick={onClose}>
-            <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal" style={{ maxWidth: 580, maxHeight: '85vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
                 <h2>Add Node</h2>
                 <form onSubmit={submit}>
-                    <div className="form-group"><label>Title</label><input className="input" required autoFocus value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} /></div>
-                    <div className="form-group"><label>Description</label><textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} /></div>
+                    <div className="form-group"><label>Title <span style={{ color: 'var(--danger)' }}>*</span></label><input className="input" required autoFocus value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} /></div>
+                    <div className="form-group"><label>Description</label><textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} style={{ minHeight: 72 }} /></div>
                     <div className="form-group">
-                        <label>Parent Node (optional)</label>
-                        <select value={form.parent_id} onChange={e => setForm(p => ({ ...p, parent_id: e.target.value }))}>
+                        <label>Parent Node <span className="text-muted" style={{ fontSize: 12 }}>(optional)</span></label>
+                        <select value={form.parent_id} onChange={handleParentChange}>
                             <option value="">— Root (no parent) —</option>
                             {nodes.map(n => <option key={n.id} value={n.id}>{n.title}</option>)}
                         </select>
                     </div>
+                    <div className="form-group">
+                        <label>Order / Position among siblings</label>
+                        <input className="input" type="number" min="0" value={form.order_index}
+                            onChange={e => setForm(p => ({ ...p, order_index: e.target.value }))}
+                            style={{ width: 90 }}
+                        />
+                        <p className="text-muted" style={{ fontSize: 11, marginTop: 4 }}>0 = first among siblings. Auto-set to next available index.</p>
+                    </div>
+                    <ResourceEditor resources={resources} onChange={setResources} />
                     <div className="modal-footer">
                         <button className="btn btn-ghost" type="button" onClick={onClose}>Cancel</button>
                         <button className="btn btn-primary" disabled={saving}>{saving ? 'Adding…' : 'Add Node'}</button>
@@ -890,19 +1015,18 @@ export default function RoadmapDetail() {
         setQuizNode(null);
     };
 
-    const handleAddNode = (node) => {
-        const updated = [...flatNodes, node];
-        setFlatNodes(updated);
-        rebuildGraph(updated, progressMap, quizPassedMap, selectedNode?.id);
+    const handleAddNode = async () => {
+        // Re-fetch the full roadmap tree so flattenTree can assign correct _depth,
+        // has_children, and order_index-sorted siblings for all nodes.
         setShowAddNode(false);
+        await load();
     };
 
-    const handleEditNode = (updatedNode) => {
-        const updated = flatNodes.map(n => n.id === updatedNode.id ? { ...n, ...updatedNode } : n);
-        setFlatNodes(updated);
-        rebuildGraph(updated, progressMap, quizPassedMap, updatedNode.id);
-        setSelectedNode(updatedNode);
+    const handleEditNode = async (updatedNode) => {
+        // Re-fetch so the tree is fully rebuilt with correct depth/index metadata.
         setShowEditNode(false);
+        setSelectedNode(null);
+        await load();
     };
 
     const handleNodeDragStop = useCallback((event, node) => {

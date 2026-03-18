@@ -342,12 +342,18 @@ class ProgressService:
         if not existing_progress or existing_progress.status != NodeStatus.done:
             is_newly_done = status == NodeStatus.done
 
+        # Preserve existing quiz_passed=True even when bypass_quiz=False.
+        # mark_quiz_passed() may have already set quiz_passed=True (via submit_quiz)
+        # so we must not overwrite it back to False here.
+        existing_quiz_passed = existing_progress.quiz_passed if existing_progress else False
+        effective_quiz_passed = existing_quiz_passed or bypass_quiz
+
         progress = await self.repo.upsert_node_progress(
             user_id=user_id,
             node_id=node_id,
             roadmap_id=roadmap_id,
             status=status,
-            quiz_passed=bypass_quiz if status == NodeStatus.done else False,
+            quiz_passed=effective_quiz_passed if status == NodeStatus.done else False,
         )
 
         # Award XP only when ALL root nodes (parent_id is None) are completed.
@@ -357,7 +363,7 @@ class ProgressService:
             from sqlalchemy import select as sa_select, func as sa_func
             from app.models.models import RoadmapNode as _RNModel
             from app.models.models import UserNodeProgress as _UNPModel
-            from app.models.schemas.enums import NodeStatus as _NS
+            from app.models.models import NodeStatus as _NS
 
             # Count total root nodes
             root_count_result = await self.db.execute(

@@ -4,7 +4,7 @@ Chat Repository — manages chat sessions and message history per node.
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -95,3 +95,18 @@ class ChatRepository:
         )
         messages = result.scalars().all()
         return list(reversed(messages))  # Chronological order for LLM
+
+    async def delete_quiz_answer_messages(self, session_id: uuid.UUID) -> None:
+        """
+        Remove ALL previously stored __QUIZ_ANSWERS__ system messages for this session.
+        Called before each new quiz generation so only one answer-key row ever exists,
+        preventing duplicate rows caused by React StrictMode double-invoking effects.
+        """
+        await self.db.execute(
+            delete(ChatMessage).where(
+                ChatMessage.session_id == session_id,
+                ChatMessage.role == ChatRole.system,
+                ChatMessage.content.like("__QUIZ_ANSWERS__%"),
+            )
+        )
+        await self.db.flush()
