@@ -95,13 +95,18 @@ function computeEffectiveStatus(node, orderedNodes, progressMap, quizPassedMap, 
     const children = orderedNodes.filter(n => n.parent_id === node.id);
     if (children.length > 0) {
         const allChildrenDone = children.every(c => {
-            // Need recursive check to see if child is actually done (in case it's a parent too)
             const cStatus = computeEffectiveStatus(c, orderedNodes, progressMap, quizPassedMap, isAssigned);
             return cStatus === 'done';
         });
-        if (allChildrenDone) return 'done';
+        if (allChildrenDone) {
+            // If this parent has resources, it needs its own quiz — show as in_progress
+            const hasResources = node.resources && node.resources.length > 0;
+            if (hasResources) return nodeStatus === 'in_progress' ? 'in_progress' : 'pending';
+            // No resources = pure section header → auto-done
+            return 'done';
+        }
         
-        // If not all done, it is inherently locked because the user cannot manually complete it
+        // If not all children done, parent is locked (user cannot manually complete it)
         return 'locked';
     }
 
@@ -928,6 +933,7 @@ export default function RoadmapDetail() {
     const markNodeCompleted = async (completedNode, bypassQuiz = false) => {
         // Snapshot root node done count BEFORE the API call for toast detection
         const rootNodes = flatNodes.filter(n => !n.parent_id);
+        const rootCount = rootNodes.length || 1;
         const previousDoneRootCount = rootNodes.filter(n => progressMap[n.id] === 'done').length;
 
         // 1. Mark the completed node as 'done' in the backend.
@@ -942,19 +948,28 @@ export default function RoadmapDetail() {
         }
 
         // 2. Re-fetch all progress from the DB to pick up auto-completed parents
-        await load();
+        //    Also fetch the fresh progress to check if all roots are now done
+        try {
+            const pr = await progressApi.getRoadmapProgress(completedNode.roadmap_id);
+            const statuses = pr.data.node_statuses || [];
+            const newPMap = {};
+            const newQMap = {};
+            statuses.forEach(p => {
+                newPMap[p.node_id] = p.status;
+                newQMap[p.node_id] = p.quiz_passed || false;
+            });
 
-        // 3. Show XP toast if all root nodes are now completed
-        //    (load() has already updated progressMap, but we need the NEW values)
-        //    We check by re-reading from the fresh state after load.
-        //    Since load() is async and sets state, we use a slight workaround:
-        //    compare with the snapshot taken before.
-        const rootCount = rootNodes.length || 1;
-        if (previousDoneRootCount < rootCount) {
-            // If previously not all done, show toast (the backend awarded XP)
-            setXpToast({ amount: 50, nodeName: "Entire Roadmap" });
-            setTimeout(() => setXpToast(null), 4000);
-        }
+            // 3. Check if ALL root nodes are now done (from fresh DB data)
+            const currentDoneRootCount = rootNodes.filter(n => newPMap[n.id] === 'done').length;
+
+            // Show XP toast ONLY when transitioning from incomplete → fully complete
+            if (currentDoneRootCount === rootCount && previousDoneRootCount < rootCount) {
+                setXpToast({ amount: 50, nodeName: "Entire Roadmap" });
+                setTimeout(() => setXpToast(null), 4000);
+            }
+        } catch { /* progress fetch failed, load() below will handle UI */ }
+
+        await load();
         reloadUser();
     };
 

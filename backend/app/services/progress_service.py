@@ -280,6 +280,12 @@ class ProgressService:
         if parent_progress and parent_progress.status == NodeStatus.done:
             return  # Already done, nothing to do
 
+        # If the parent has resources, it needs its own quiz — do NOT auto-complete.
+        # Only pure section headers (no resources) are auto-completed.
+        parent_resources = parent.resources or []
+        if parent_resources and len(parent_resources) > 0:
+            return  # Parent has resources → user must complete it manually via quiz
+
         # Count total children of this parent
         total_children_result = await self.db.execute(
             sa_select(sa_func.count(RNModel.id)).where(
@@ -303,7 +309,7 @@ class ProgressService:
         done_children = done_children_result.scalar_one()
 
         if done_children >= total_children:
-            # All children done → auto-complete the parent
+            # All children done → auto-complete the parent (no resources = section header)
             await self.repo.upsert_node_progress(
                 user_id=user_id,
                 node_id=parent.id,

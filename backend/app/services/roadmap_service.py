@@ -162,6 +162,8 @@ class RoadmapService:
         roadmap = await self.repo.get_by_id(roadmap_id)
         if not roadmap:
             raise NotFoundException("Roadmap")
+        if roadmap.is_published:
+            raise BadRequestException("Cannot edit a published roadmap")
 
         updates = data.model_dump(exclude_none=True)
         return await self.repo.update(roadmap, **updates)
@@ -192,6 +194,8 @@ class RoadmapService:
         roadmap = await self.repo.get_by_id(roadmap_id)
         if not roadmap:
             raise NotFoundException("Roadmap")
+        if roadmap.is_published:
+            raise BadRequestException("Cannot add nodes to a published roadmap")
 
         # Validate parent belongs to same roadmap
         if data.parent_id:
@@ -218,11 +222,23 @@ class RoadmapService:
         node_id: uuid.UUID,
         data: NodeUpdateRequest,
     ) -> RoadmapNode:
+        roadmap = await self.repo.get_by_id(roadmap_id)
+        if not roadmap:
+            raise NotFoundException("Roadmap")
+
+        updates = data.model_dump(exclude_none=True)
+
+        # On published roadmaps, only allow visual position updates
+        if roadmap.is_published:
+            position_only_keys = {"position_x", "position_y"}
+            content_keys = set(updates.keys()) - position_only_keys
+            if content_keys:
+                raise BadRequestException("Cannot edit nodes of a published roadmap")
+
         node = await self.repo.get_node_by_id(node_id)
         if not node or node.roadmap_id != roadmap_id:
             raise NotFoundException("Node")
 
-        updates = data.model_dump(exclude_none=True)
         if "resources" in updates and updates["resources"] is not None:
             updates["resources"] = [r.model_dump() if hasattr(r, 'model_dump') else r for r in updates["resources"]]
 
@@ -233,6 +249,12 @@ class RoadmapService:
         roadmap_id: uuid.UUID,
         node_id: uuid.UUID,
     ) -> None:
+        roadmap = await self.repo.get_by_id(roadmap_id)
+        if not roadmap:
+            raise NotFoundException("Roadmap")
+        if roadmap.is_published:
+            raise BadRequestException("Cannot delete nodes from a published roadmap")
+
         node = await self.repo.get_node_by_id(node_id)
         if not node or node.roadmap_id != roadmap_id:
             raise NotFoundException("Node")
