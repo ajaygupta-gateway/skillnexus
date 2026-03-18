@@ -515,7 +515,7 @@ function ChatPanel({ node }) {
 }
 
 /* ─── Node Info Panel ────────────────────────────────────────────────── */
-function NodeInfoPanel({ node, effectiveStatus, onMarkDone, onMarkInProgress, isAdmin, onDelete, isAssigned, onEdit }) {
+function NodeInfoPanel({ node, effectiveStatus, onMarkDone, onMarkInProgress, isAdmin, onDelete, isAssigned, onEdit, isPublished }) {
     const [saving, setSaving] = useState(false);
     const isHeader = isHeaderNode(node);
 
@@ -536,11 +536,33 @@ function NodeInfoPanel({ node, effectiveStatus, onMarkDone, onMarkInProgress, is
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--success)', fontSize: 13, padding: '8px 0' }}>
                                 <CheckCircle size={16} /> <strong>Section Complete!</strong>
                             </div>
+                        ) : (effectiveStatus === 'pending' || effectiveStatus === 'in_progress') && node.resources?.length > 0 ? (
+                            /* Parent has resources and all children are done — show action buttons */
+                            <div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', marginBottom: 10, background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                                    <BookOpen size={14} color="var(--primary-h)" />
+                                    <span style={{ fontSize: 13, color: 'var(--muted)' }}>
+                                        All sub-topics done! Pass this section&apos;s quiz to complete it.
+                                    </span>
+                                </div>
+                                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                    <button className="btn btn-ghost btn-sm" disabled={saving || effectiveStatus === 'in_progress'}
+                                        onClick={async () => { setSaving(true); await onMarkInProgress(node); setSaving(false); }}>
+                                        <Clock size={13} /> {effectiveStatus === 'in_progress' ? 'In Progress' : 'Mark In Progress'}
+                                    </button>
+                                    <button className="btn btn-primary btn-sm" disabled={saving}
+                                        onClick={() => onMarkDone(node)}>
+                                        <CheckCircle size={13} /> Mark as Done
+                                    </button>
+                                </div>
+                            </div>
                         ) : (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)' }}>
                                 <BookOpen size={14} color="var(--primary-h)" />
                                 <span style={{ fontSize: 13, color: 'var(--muted)' }}>
-                                    This section completes automatically when all sub-topics are finished.
+                                    {node.resources?.length > 0
+                                        ? 'Complete all sub-topics first, then pass this section\'s quiz to finish.'
+                                        : 'This section completes automatically when all sub-topics are finished.'}
                                 </span>
                             </div>
                         )
@@ -591,7 +613,7 @@ function NodeInfoPanel({ node, effectiveStatus, onMarkDone, onMarkInProgress, is
                 </div>
             )}
 
-            {isAdmin && (
+            {isAdmin && !isPublished && (
                 <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                     <button className="btn btn-ghost btn-sm" style={{ color: 'var(--primary)', borderColor: 'var(--primary)' }}
                         onClick={() => onEdit(node)}>
@@ -1096,11 +1118,13 @@ export default function RoadmapDetail() {
                                 <Save size={13} /> {savingPositions ? 'Saving...' : 'Save Positions'}
                             </button>
                         )}
-                        <button className="btn btn-ghost btn-sm" onClick={() => setShowAddNode(true)}><Plus size={13} /> Node</button>
+                        {!roadmap.is_published && <button className="btn btn-ghost btn-sm" onClick={() => setShowAddNode(true)}><Plus size={13} /> Node</button>}
                         {!roadmap.is_published && <button className="btn btn-success btn-sm" onClick={handlePublish}>Publish</button>}
-                        <button className="btn btn-sm" onClick={handleDeleteRoadmap} style={{ color: 'white', backgroundColor: 'var(--danger)', borderColor: 'var(--danger)' }}>
-                            <Trash2 size={13} /> Delete
-                        </button>
+                        {!roadmap.is_published && (
+                            <button className="btn btn-sm" onClick={handleDeleteRoadmap} style={{ color: 'white', backgroundColor: 'var(--danger)', borderColor: 'var(--danger)' }}>
+                                <Trash2 size={13} /> Delete
+                            </button>
+                        )}
                     </div>
                 )}
                 {!isAdmin && !isAssigned && roadmap.is_published && (
@@ -1156,6 +1180,7 @@ export default function RoadmapDetail() {
                                     onMarkInProgress={handleMarkInProgress}
                                     isAdmin={isAdmin}
                                     isAssigned={isAssigned}
+                                    isPublished={roadmap.is_published}
                                     onDelete={handleDeleteNode}
                                     onEdit={() => setShowEditNode(true)}
                                 />
