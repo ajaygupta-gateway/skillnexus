@@ -20,7 +20,7 @@ AI-Powered Enterprise Learning & Development Platform — full-stack monorepo.
 | 🏆 **Leaderboard** | Global XP ranking |
 | 🎛️ **Control Center** | Admin dashboard with platform stats, assignment management, analytics, and roadmap requests |
 | 📊 **Analytics** | Per-roadmap completion stats, skill gap analysis, per-user progress reports |
-| 🔐 **Published Lock** | Published roadmaps become read-only (no edits, node add/delete blocked) |
+| 🔐 **Published Lock** | Published roadmaps are read-only (no edits or node changes), but can be deleted |
 | 👥 **Role-Based UI** | Admins see platform management views; Learners see XP, streaks, and leaderboard |
 
 ---
@@ -221,7 +221,8 @@ uv run pytest --cov=app --cov-report=html -v
 
 | Document | Description |
 |---|---|
-| [ROADMAP_NODE_FLOW.md](docs/ROADMAP_NODE_FLOW.md) | Deep dive into graph rendering, quiz system, node completion, and XP awarding |
-| [ADMIN_ANALYTICS.md](docs/ADMIN_ANALYTICS.md) | Admin features: Control Center, assignments, analytics, roadmap requests |
-| [RESUME_PARSING.md](docs/RESUME_PARSING.md) | Resume analysis pipeline, PII sanitization, and AI suggestions |
-| [DEV_COMMANDS.md](docs/DEV_COMMANDS.md) | Docker, migrations, and developer workflow commands |
+| [ROADMAP_NODE_FLOW.md](./docs/ROADMAP_NODE_FLOW.md) | Deep dive into graph rendering, quiz system, node completion, and XP awarding |
+| [ADMIN_ANALYTICS.md](./docs/ADMIN_ANALYTICS.md) | Admin features: Control Center, assignments, analytics, roadmap requests |
+| [RESUME_PARSING.md](./docs/RESUME_PARSING.md) | Resume analysis pipeline, PII sanitization, and AI suggestions |
+| [AUTH_JWT_FLOW.md](./docs/AUTH_JWT_FLOW.md) | JWT authentication, token lifecycle, refresh rotation, and security |
+| [DEV_COMMANDS.md](./docs/DEV_COMMANDS.md) | Docker, migrations, and developer workflow commands |

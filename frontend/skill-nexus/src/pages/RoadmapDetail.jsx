@@ -1120,11 +1120,9 @@ export default function RoadmapDetail() {
                         )}
                         {!roadmap.is_published && <button className="btn btn-ghost btn-sm" onClick={() => setShowAddNode(true)}><Plus size={13} /> Node</button>}
                         {!roadmap.is_published && <button className="btn btn-success btn-sm" onClick={handlePublish}>Publish</button>}
-                        {!roadmap.is_published && (
-                            <button className="btn btn-sm" onClick={handleDeleteRoadmap} style={{ color: 'white', backgroundColor: 'var(--danger)', borderColor: 'var(--danger)' }}>
-                                <Trash2 size={13} /> Delete
-                            </button>
-                        )}
+                        <button className="btn btn-sm" onClick={handleDeleteRoadmap} style={{ color: 'white', backgroundColor: 'var(--danger)', borderColor: 'var(--danger)' }}>
+                            <Trash2 size={13} /> Delete
+                        </button>
                     </div>
                 )}
                 {!isAdmin && !isAssigned && roadmap.is_published && (

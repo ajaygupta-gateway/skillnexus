@@ -102,7 +102,7 @@ Once published via `POST /roadmaps/{id}/publish`, a roadmap becomes read-only:
 | Delete nodes | ❌ 400 error |
 | Edit node content | ❌ 400 error |
 | Update node positions | ✅ Allowed |
-| Delete roadmap | ❌ 400 error |
+| Delete roadmap | ✅ Allowed |
 
 Enforced in `roadmap_service.py` with an `is_published` check.
 

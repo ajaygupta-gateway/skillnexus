@@ -341,7 +341,7 @@ Once an admin publishes a roadmap, the following are **blocked**:
 | Delete nodes | ❌ Blocked |
 | Edit node content | ❌ Blocked |
 | Move node positions (drag) | ✅ Allowed |
-| Delete entire roadmap | ❌ Blocked |
+| Delete entire roadmap | ✅ Allowed |
 
 Enforced on both backend (400 error) and frontend (buttons hidden).
 

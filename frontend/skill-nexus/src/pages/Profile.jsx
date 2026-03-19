@@ -45,7 +45,7 @@ export default function Profile() {
                     <div style={{ marginBottom: 16 }}>
                         <div className="flex justify-between" style={{ marginBottom: 6, fontSize: 13 }}>
                             <span>Level {user.level}</span>
-                            <span className="text-muted">{user.xp_balance} XP total</span>
+                            <span className="text-muted">{user.xp_balance % 500} <span style={{ fontSize: '0.85em', opacity: 0.6 }}>/ 500</span> XP</span>
                         </div>
                         <div className="progress-bar">
                             <div className="progress-bar-fill" style={{ width: `${xpPct}%` }} />
@@ -57,7 +57,7 @@ export default function Profile() {
                 {/* Stats — learners only */}
                 {!isAdmin && (
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-                        {[['🔥 Streak', `${user.streak_count} days`], ['⚡ XP', user.xp_balance], ['🏆 Level', user.level]].map(([l, v]) => (
+                        {[['🔥 Streak', `${user.streak_count} days`], ['⚡ XP', `${user.xp_balance % 500}`], ['🏆 Level', user.level]].map(([l, v]) => (
                             <div key={l} style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}>
                                 <div style={{ fontWeight: 700, fontSize: '1.2rem' }}>{v}</div>
                                 <div className="text-muted" style={{ fontSize: 12 }}>{l}</div>

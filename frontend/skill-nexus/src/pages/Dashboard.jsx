@@ -4,9 +4,6 @@ import { userApi, adminApi, roadmapApi } from '../api/client';
 import { Trophy, Zap, Flame, BarChart2, Users, Map, UserPlus, Activity, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-/* ═══════════════════════════════════════════════════════════════════════════ */
-/*  LEARNER DASHBOARD — XP, streak, leaderboard, recent events               */
-/* ═══════════════════════════════════════════════════════════════════════════ */
 function LearnerDashboard({ user }) {
     const [leaderboard, setLeaderboard] = useState([]);
     const [txns, setTxns] = useState([]);
@@ -23,8 +20,8 @@ function LearnerDashboard({ user }) {
         <>
             <div className="stats-row">
                 <div className="stat-card">
-                    <div className="value" style={{ color: 'var(--warn)' }}><Zap size={18} style={{ verticalAlign: 'middle', marginRight: 4 }} />{user?.xp_balance ?? 0}</div>
-                    <div className="label">Total XP</div>
+                    <div className="value" style={{ color: 'var(--warn)' }}><Zap size={18} style={{ verticalAlign: 'middle', marginRight: 4 }} />{(user?.xp_balance ?? 0) % 500}<span className="text-muted" style={{ fontSize: '0.6em', fontWeight: 400 }}> / 500</span></div>
+                    <div className="label">Level XP</div>
                 </div>
                 <div className="stat-card">
                     <div className="value" style={{ color: 'var(--primary-h)' }}>{user?.level ?? 1}</div>

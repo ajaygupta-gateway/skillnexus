@@ -60,7 +60,7 @@ export default function Layout({ children }) {
                     <div className="role">
                         {isAdmin || isManager
                             ? <span className="badge badge-primary" style={{ fontSize: 11 }}>{user?.role}</span>
-                            : <>Level {user?.level} · {user?.xp_balance} XP</>
+                            : <>Level {user?.level} · {(user?.xp_balance ?? 0) % 500} XP</>
                         }
                     </div>
                 </div>
