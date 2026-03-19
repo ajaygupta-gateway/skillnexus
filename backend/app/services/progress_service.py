@@ -373,12 +373,14 @@ class ProgressService:
 
             user = await self.user_repo.get_by_id(user_id)
             if user:
+                roadmap = await self.roadmap_repo.get_by_id(roadmap_id)
+                roadmap_title = roadmap.title if roadmap else "Unknown"
                 await self.user_repo.add_xp(
                     user_id=user_id,
                     user_name=user.display_name,
                     amount=settings.XP_NODE_COMPLETE,
                     event_type=PointEventType.roadmap_complete,
-                    description="Completed all foundations of roadmap!",
+                    description=f"Completed roadmap: {roadmap_title}",
                     reference_id=str(roadmap_id),
                 )
                 await self.user_repo.update_level(user)
