@@ -116,9 +116,11 @@ class UserRepository:
             last = user.last_login_date.replace(tzinfo=UTC)
             days_diff = (now.date() - last.date()).days
 
-            if days_diff == 0:
-                # Already logged in today
+            if days_diff <= 0:
+                # Already logged in today (or system clock moved backwards)
                 already_logged_in_today = True
+                if days_diff < 0:
+                    now = last  # Prevent backward time travel farming
             elif days_diff == 1:
                 # Consecutive day — increment streak
                 user.streak_count += 1
