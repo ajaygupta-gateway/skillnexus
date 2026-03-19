@@ -25,6 +25,11 @@ export default function Profile() {
     const isAdmin = user.role === 'admin' || user.role === 'manager';
     const xpPct = (user.xp_balance % 500) / 5;
 
+    // Check if the form has any changes compared to the original user data
+    const hasChanges = isAdmin
+        ? form.display_name !== (user.display_name || '')
+        : form.display_name !== (user.display_name || '') || form.current_role_title !== (user.current_role_title || '');
+
     return (
         <div className="page" style={{ maxWidth: 600 }}>
             <div className="page-header"><h1>Profile</h1></div>
@@ -74,7 +79,7 @@ export default function Profile() {
                     {!isAdmin && (
                         <div className="form-group"><label>Current Role Title</label><input className="input" placeholder="e.g. Frontend Developer" value={form.current_role_title} onChange={e => setForm(p => ({ ...p, current_role_title: e.target.value }))} /></div>
                     )}
-                    <button className="btn btn-primary" disabled={saving}>
+                    <button className="btn btn-primary" disabled={saving || !hasChanges}>
                         <Save size={14} /> {saving ? 'Saving…' : success ? 'Saved ✓' : 'Save Changes'}
                     </button>
                 </form>

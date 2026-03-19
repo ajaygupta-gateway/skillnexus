@@ -55,11 +55,11 @@ export default function Layout({ children }) {
                     {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
                 </button>
 
-                <div className="user-card">
+                <div className="user-card" style={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', gap: '8px' }}>
                     <div className="name">{user?.display_name}</div>
                     <div className="role">
                         {isAdmin || isManager
-                            ? <span className="badge badge-primary" style={{ fontSize: 11 }}>{user?.role}</span>
+                            ? <span className="badge badge-primary" style={{ fontSize: 11}}>{user?.role.toUpperCase()}</span>
                             : <>Level {user?.level} · {(user?.xp_balance ?? 0) % 500} XP</>
                         }
                     </div>

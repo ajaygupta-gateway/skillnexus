@@ -62,19 +62,19 @@ export default function Resume() {
     return (
         <div className="page" style={{ maxWidth: 640 }}>
             <div className="page-header"><h1>Resume Parser</h1></div>
-            <p className="text-muted" style={{ marginBottom: 20 }}>Upload your resume (PDF). AI will extract your skills and suggest relevant learning roadmaps.</p>
+            <p className="text-muted" style={{ marginBottom: 20 }}>Upload your resume (PDF OR PNG). AI will extract your skills and suggest relevant learning roadmaps.</p>
 
             <div className="card" style={{ marginBottom: 20 }}>
                 <form onSubmit={upload}>
                     <div style={{ border: '2px dashed var(--border)', borderRadius: 8, padding: 32, textAlign: 'center', marginBottom: 16, background: 'var(--surface2)', transition: 'border-color .15s' }}
                         onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--primary)'; }}
                         onDragLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; }}
-                        onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f?.type === 'application/pdf') setFile(f); }}>
+                        onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f && (f.type === 'application/pdf || f.type ===image/png')) setFile(f); }}>
                         <Upload size={32} color="var(--muted)" style={{ marginBottom: 8 }} />
-                        <p style={{ marginBottom: 8, fontSize: 14 }}>{file ? file.name : 'Drag & drop your PDF here'}</p>
+                        <p style={{ marginBottom: 8, fontSize: 14 }}>{file ? file.name : 'Drag & drop your PNG OR PDF here'}</p>
                         <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
                             Browse File
-                            <input type="file" accept=".pdf" style={{ display: 'none' }} onChange={e => setFile(e.target.files[0])} />
+                            <input type="file" accept=".pdf, .png" style={{ display: 'none' }} onChange={e => setFile(e.target.files[0])} />
                         </label>
                     </div>
                     {error && <div className="auth-error">{error}</div>}

@@ -152,7 +152,7 @@ class UserRepository:
                 func.sum(PointTransaction.amount).label("xp_earned"),
             )
             .join(PointTransaction, PointTransaction.user_id == User.id)
-            .where(PointTransaction.created_at >= since)
+            .where(PointTransaction.created_at >= since, User.role == UserRole.learner,)
             .group_by(User.id, User.display_name, User.level)
             .order_by(func.sum(PointTransaction.amount).desc())
             .limit(limit)

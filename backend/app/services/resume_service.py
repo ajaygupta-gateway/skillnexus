@@ -69,6 +69,15 @@ def _extract_text_from_pdf(file_path: str) -> str:
     except Exception as e:
         raise ValueError(f"Failed to extract text from PDF: {str(e)}")
 
+def _extract_text_from_image(file_path: str) -> str:
+    import pytesseract
+    from PIL import Image
+
+    try:
+        text = pytesseract.image_to_string(Image.open(file_path))
+        return text.strip()
+    except Exception as e:
+        raise ValueError(f"Failed to extract text from image: {str(e)}")
 
 def _sanitize_resume_text(text: str) -> str:
     """Remove personal details (phone numbers, emails, personal URLs, addresses) from resume text."""
@@ -147,9 +156,9 @@ class ResumeService:
         file_bytes: bytes,
     ) -> ResumeUploadResponse:
         # ── Validate ───────────────────────────────────────────────────────────
-        if content_type not in ("application/pdf", "application/octet-stream"):
-            if not filename.lower().endswith(".pdf"):
-                raise InvalidFileTypeException("PDF")
+        if content_type not in ("application/pdf", "image/png", "application/octet-stream"):
+            if not filename.lower().endswith(".pdf") or filename.lower().endswith(".png"):
+                raise InvalidFileTypeException("PDF Or PNG")
 
         max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
         if len(file_bytes) > max_bytes:
@@ -176,7 +185,12 @@ class ResumeService:
 
         # ── Extract text ───────────────────────────────────────────────────────
         try:
-            raw_text = _extract_text_from_pdf(str(file_path))
+            if filename.lower().endswith(".pdf"):
+                raw_text = _extract_text_from_pdf(str(file_path))
+            elif filename.lower().endswith(".png"):
+                raw_text = _extract_text_from_image(str(file_path))
+            else:
+                raise InvalidFileTypeException("Unsupported file type")
             sanitized_text = _sanitize_resume_text(raw_text)
             resume.raw_text = sanitized_text  # Store sanitized text
         except Exception as e:
