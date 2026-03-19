@@ -21,6 +21,8 @@ export default function Profile() {
     };
 
     if (!user) return null;
+
+    const isAdmin = user.role === 'admin' || user.role === 'manager';
     const xpPct = (user.xp_balance % 500) / 5;
 
     return (
@@ -38,33 +40,40 @@ export default function Profile() {
                     </div>
                 </div>
 
-                {/* XP bar */}
-                <div style={{ marginBottom: 16 }}>
-                    <div className="flex justify-between" style={{ marginBottom: 6, fontSize: 13 }}>
-                        <span>Level {user.level}</span>
-                        <span className="text-muted">{user.xp_balance} XP total</span>
-                    </div>
-                    <div className="progress-bar">
-                        <div className="progress-bar-fill" style={{ width: `${xpPct}%` }} />
-                    </div>
-                    <div className="text-muted" style={{ fontSize: 12, marginTop: 4 }}>{500 - (user.xp_balance % 500)} XP to Level {user.level + 1}</div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-                    {[['🔥 Streak', `${user.streak_count} days`], ['⚡ XP', user.xp_balance], ['🏆 Level', user.level]].map(([l, v]) => (
-                        <div key={l} style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}>
-                            <div style={{ fontWeight: 700, fontSize: '1.2rem' }}>{v}</div>
-                            <div className="text-muted" style={{ fontSize: 12 }}>{l}</div>
+                {/* XP bar — learners only */}
+                {!isAdmin && (
+                    <div style={{ marginBottom: 16 }}>
+                        <div className="flex justify-between" style={{ marginBottom: 6, fontSize: 13 }}>
+                            <span>Level {user.level}</span>
+                            <span className="text-muted">{user.xp_balance} XP total</span>
                         </div>
-                    ))}
-                </div>
+                        <div className="progress-bar">
+                            <div className="progress-bar-fill" style={{ width: `${xpPct}%` }} />
+                        </div>
+                        <div className="text-muted" style={{ fontSize: 12, marginTop: 4 }}>{500 - (user.xp_balance % 500)} XP to Level {user.level + 1}</div>
+                    </div>
+                )}
+
+                {/* Stats — learners only */}
+                {!isAdmin && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                        {[['🔥 Streak', `${user.streak_count} days`], ['⚡ XP', user.xp_balance], ['🏆 Level', user.level]].map(([l, v]) => (
+                            <div key={l} style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}>
+                                <div style={{ fontWeight: 700, fontSize: '1.2rem' }}>{v}</div>
+                                <div className="text-muted" style={{ fontSize: 12 }}>{l}</div>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
 
             <div className="card">
                 <h3 style={{ marginBottom: 16 }}><User size={15} style={{ marginRight: 6, verticalAlign: 'middle' }} />Edit Profile</h3>
                 <form onSubmit={save}>
                     <div className="form-group"><label>Display Name</label><input className="input" value={form.display_name} onChange={e => setForm(p => ({ ...p, display_name: e.target.value }))} /></div>
-                    <div className="form-group"><label>Current Role Title</label><input className="input" placeholder="e.g. Frontend Developer" value={form.current_role_title} onChange={e => setForm(p => ({ ...p, current_role_title: e.target.value }))} /></div>
+                    {!isAdmin && (
+                        <div className="form-group"><label>Current Role Title</label><input className="input" placeholder="e.g. Frontend Developer" value={form.current_role_title} onChange={e => setForm(p => ({ ...p, current_role_title: e.target.value }))} /></div>
+                    )}
                     <button className="btn btn-primary" disabled={saving}>
                         <Save size={14} /> {saving ? 'Saving…' : success ? 'Saved ✓' : 'Save Changes'}
                     </button>

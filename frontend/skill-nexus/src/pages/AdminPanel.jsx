@@ -5,7 +5,7 @@ import { UserPlus, BarChart2, Users, Activity } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 function AssignModal({ users, roadmaps, onClose, onAssigned }) {
-    const [form, setForm] = useState({ user_ids: [], roadmap_id: '', strict_mode: false });
+    const [form, setForm] = useState({ user_ids: [], roadmap_id: '' });
     const [saving, setSaving] = useState(false);
 
     const toggle = (id) => setForm(p => ({
@@ -45,12 +45,6 @@ function AssignModal({ users, roadmaps, onClose, onAssigned }) {
                                 </label>
                             ))}
                         </div>
-                    </div>
-                    <div className="form-group">
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                            <input type="checkbox" checked={form.strict_mode} onChange={e => setForm(p => ({ ...p, strict_mode: e.target.checked }))} />
-                            Strict Mode (require quiz before marking done)
-                        </label>
                     </div>
                     <div className="modal-footer">
                         <button className="btn btn-ghost" type="button" onClick={onClose}>Cancel</button>
@@ -148,7 +142,7 @@ export default function AdminPanel() {
     return (
         <div className="page">
             <div className="page-header">
-                <h1>{isManager ? 'Team Overview' : 'L&D Admin'}</h1>
+                <h1>{isManager ? 'Team Overview' : 'Control Center'}</h1>
                 {!isManager && <button className="btn btn-primary" onClick={() => setShowAssign(true)}><UserPlus size={14} /> Assign</button>}
             </div>
 

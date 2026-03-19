@@ -49,6 +49,13 @@ class ProgressService:
         if not roadmap:
             raise NotFoundException("Roadmap")
 
+        # Pre-fetch the node tree once (shared across all users)
+        flat_nodes = await self.roadmap_repo.get_full_tree(data.roadmap_id)
+        root_nodes = sorted(
+            [n for n in flat_nodes if n.get('parent_id') is None],
+            key=lambda n: n.get('order_index', 0)
+        ) if flat_nodes else []
+
         created = []
         for user_id in data.user_ids:
             # Check if assignment already exists
@@ -64,6 +71,18 @@ class ProgressService:
                 assigned_by=assigned_by.id,
                 strict_mode=data.strict_mode,
             )
+
+            # Initialize first root node as in_progress (same as self-enroll)
+            if root_nodes:
+                first_node = root_nodes[0]
+                first_node_id = uuid.UUID(first_node['id']) if isinstance(first_node['id'], str) else first_node['id']
+                await self.repo.upsert_node_progress(
+                    user_id=user_id,
+                    node_id=first_node_id,
+                    roadmap_id=data.roadmap_id,
+                    status=NodeStatus.in_progress,
+                )
+
             created.append(
                 AssignmentResponse(
                     id=assignment.id,
@@ -105,7 +124,7 @@ class ProgressService:
             user_id=user_id,
             roadmap_id=roadmap_id,
             assigned_by=user_id,
-            strict_mode=False,
+            strict_mode=True,
         )
         
         # Initialize first node as in_progress (unlocked)
@@ -203,6 +222,17 @@ class ProgressService:
         assignment = await self.repo.get_assignment_by_id(assignment_id)
         if not assignment:
             raise NotFoundException("Assignment")
+
+        # Clean up all node progress for this user + roadmap
+        from sqlalchemy import delete as sa_delete
+        from app.models.models import UserNodeProgress
+        await self.db.execute(
+            sa_delete(UserNodeProgress).where(
+                UserNodeProgress.user_id == assignment.user_id,
+                UserNodeProgress.roadmap_id == assignment.roadmap_id,
+            )
+        )
+
         await self.repo.delete_assignment(assignment)
 
     # ── Node Progress ──────────────────────────────────────────────────────────

@@ -36,7 +36,7 @@ class RoadmapProgressSummary(BaseSchema):
 class AssignmentCreateRequest(BaseSchema):
     user_ids: list[uuid.UUID] = Field(min_length=1)
     roadmap_id: uuid.UUID
-    strict_mode: bool = False
+    strict_mode: bool = True
 
 
 class AssignmentUpdateRequest(BaseSchema):

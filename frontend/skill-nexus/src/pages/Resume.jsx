@@ -1,16 +1,21 @@
 import { useState, useEffect } from 'react';
 import { resumeApi, roadmapApi } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 import { Upload, FileText, CheckCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export default function Resume() {
+    const { user } = useAuth();
     const [file, setFile] = useState(null);
     const [uploading, setUploading] = useState(false);
     const [result, setResult] = useState(null);
     const [error, setError] = useState('');
     const [roadmaps, setRoadmaps] = useState([]);
     const [requesting, setRequesting] = useState({});
+    const [generating, setGenerating] = useState({});
     const navigate = useNavigate();
+
+    const isAdmin = user?.role === 'admin';
 
     useEffect(() => {
         roadmapApi.list({ page_size: 100 })
@@ -40,6 +45,17 @@ export default function Resume() {
         } catch (err) {
             alert("Failed to send request.");
             setRequesting(prev => ({...prev, [title]: false}));
+        }
+    };
+
+    const handleGenerate = async (title) => {
+        setGenerating(prev => ({...prev, [title]: true}));
+        try {
+            const r = await roadmapApi.generate({ prompt: `Create a comprehensive roadmap for ${title}` });
+            navigate(`/roadmaps/${r.data.id}`);
+        } catch (err) {
+            alert(err.response?.data?.detail || 'AI generation failed');
+            setGenerating(prev => ({...prev, [title]: false}));
         }
     };
 
@@ -104,6 +120,14 @@ export default function Resume() {
                                                 onClick={() => navigate(`/roadmaps/${existing.id}`)}
                                             >
                                                 View & Enroll
+                                            </button>
+                                        ) : isAdmin ? (
+                                            <button 
+                                                className="btn btn-sm btn-primary"
+                                                disabled={generating[t]}
+                                                onClick={() => handleGenerate(t)}
+                                            >
+                                                {generating[t] ? 'Generating…' : '✨ Generate by AI'}
                                             </button>
                                         ) : (
                                             <button 

@@ -221,7 +221,7 @@ After 1.8 second delay (so user sees the "Passed!" message):
   ↓
 markNodeCompleted(quizNode, bypassQuiz=false) is called:
 
-  API Call 1️⃣:
+  API Call:
     POST /api/v1/progress/roadmaps/{rid}/nodes/{node_id}
     Body: { "status": "done", "bypass_quiz": false }
 
@@ -229,6 +229,7 @@ markNodeCompleted(quizNode, bypassQuiz=false) is called:
     - Verifies user is enrolled
     - Validates quiz_passed = true (since bypass_quiz=false)
     - Upserts UserNodeProgress: status = 'done'
+    - Calls _auto_complete_parents() (see Step 5)
     - Checks: are ALL root nodes now done?
         If yes → awards 50 XP via add_xp() → PointTransaction saved to PostgreSQL
     - Recalculates assignment completion percentage
@@ -237,29 +238,36 @@ markNodeCompleted(quizNode, bypassQuiz=false) is called:
   Frontend updates quizPassedMap: { [node_id]: true }
 ```
 
-### Step 5 — Auto-Complete Parent Sections
+### Step 5 — Auto-Complete Parent Sections (Backend)
 ```
-checkAndAutoCompleteParent() runs recursively:
+_auto_complete_parents() runs on the backend within the same DB transaction:
 
-  "Is this node's parent a section header?
-   Are ALL siblings of this node now done?"
+  For each ancestor going upward:
+    1. Check: does this parent have resources?
+       → If YES: STOP. Parent requires its own quiz (user must mark it done manually).
+       → If NO: continue.
 
-  If YES:
-    API Call 2️⃣:
-      POST /api/v1/progress/roadmaps/{rid}/nodes/{parent_id}
-      Body: { "status": "done", "bypass_quiz": true }
-      (bypass_quiz=true because section headers don't need a quiz)
+    2. Check: are ALL children of this parent now "done"?
+       → If YES: auto-set parent to "done" (bypass_quiz=true)
+       → If NO: STOP.
 
-    Recurse upwards → check grandparent → great-grandparent, etc.
+    3. Recurse upward to the grandparent.
 
-  If NO: stop.
+  Key Rule:
+    Parent WITH resources → requires manual quiz completion
+    Parent WITHOUT resources → auto-completes when all children are done
 ```
 
 ### Step 6 — Graph Re-renders
 ```
-rebuildGraph(flatNodes, newPMap, newQMap, selectedNode?.id)
+Frontend calls load() to re-fetch all data from backend
   ↓
 React Flow receives updated node objects
+  ↓
+computeEffectiveStatus() determines visual status:
+  - For leaf nodes: uses progressMap directly
+  - For header nodes WITHOUT resources: "done" if all children done
+  - For header nodes WITH resources: "done" only if quiz_passed
   ↓
 Completed nodes get a green CheckCircle icon
 Parent sections auto-turn green if all children done
@@ -273,12 +281,73 @@ if (currentDoneRootCount === rootCount && previousDoneRootCount < rootCount) {
     setXpToast({ amount: 50, nodeName: "Entire Roadmap" });
     setTimeout(() => setXpToast(null), 4000);
 }
-reloadUser(); // Refreshes XP/level in the navbar
+reloadUser(); // Refreshes XP/level in the sidebar
 ```
 
 ---
 
-## Part 5: Complete Flow Diagram
+## Part 5: Enrollment Flow
+
+### Self-Enrollment (Learner)
+```
+User clicks "Enroll" on a published roadmap
+  ↓
+POST /api/v1/progress/roadmaps/{id}/enroll
+  ↓
+Backend (ProgressService.enroll_roadmap()):
+  1. Creates UserRoadmapAssignment record (strict_mode=true)
+  2. Initializes first root node as 'in_progress'
+  ↓
+User sees roadmap with first node unlocked
+```
+
+### Admin Assignment
+```
+Admin assigns roadmap via Control Center
+  ↓
+POST /api/v1/admin/assignments
+  Body: { user_ids: [...], roadmap_id: "..." }
+  ↓
+Backend (ProgressService.create_assignment()):
+  1. Creates UserRoadmapAssignment for each user (strict_mode=true)
+  2. Initializes first root node as 'in_progress' for each user
+  ↓
+Learner sees roadmap as enrolled with first node ready
+```
+
+### Admin Un-assignment
+```
+Admin removes assignment via Control Center
+  ↓
+DELETE /api/v1/admin/assignments/{id}
+  ↓
+Backend (ProgressService.delete_assignment()):
+  1. Deletes ALL UserNodeProgress records for user + roadmap
+  2. Deletes the UserRoadmapAssignment record
+  ↓
+Learner is fully unenrolled (clean slate)
+```
+
+---
+
+## Part 6: Published Roadmap Restrictions
+
+Once an admin publishes a roadmap, the following are **blocked**:
+
+| Action | Allowed? |
+|---|---|
+| Edit roadmap title/description | ❌ Blocked |
+| Add new nodes | ❌ Blocked |
+| Delete nodes | ❌ Blocked |
+| Edit node content | ❌ Blocked |
+| Move node positions (drag) | ✅ Allowed |
+| Delete entire roadmap | ❌ Blocked |
+
+Enforced on both backend (400 error) and frontend (buttons hidden).
+
+---
+
+## Part 7: Complete Flow Diagram
 
 ```
 User navigates to /roadmaps/:id
@@ -317,20 +386,17 @@ User clicks a node → Sidebar opens
               ▼
         If passed → 1.8s delay → onPassed()
               │
-              ├─► POST /progress/.../nodes/{id} { status: "done" }   ← Call 1
+              ├─► POST /progress/.../nodes/{id} { status: "done" }
               │     └─► PostgreSQL: user_node_progress status='done'
+              │     └─► Backend: _auto_complete_parents() runs atomically
               │     └─► PostgreSQL: point_transactions (if roadmap complete)
               │
-              ├─► checkAndAutoCompleteParent() [recursive]
-              │     └─► POST /progress/.../nodes/{parent_id} { status: "done", bypass_quiz: true }  ← Call 2
-              │           └─► PostgreSQL: parent node marked done
-              │
-              └─► React Flow re-renders → green nodes ✅
+              └─► Frontend re-fetches → React Flow re-renders → green nodes ✅
 ```
 
 ---
 
-## Part 6: Key Files Reference
+## Part 8: Key Files Reference
 
 | Layer | File | Role |
 |---|---|---|
@@ -342,7 +408,7 @@ User clicks a node → Sidebar opens
 | **Chat Route** | `app/api/v1/routes/chat.py` | FastAPI endpoints for quiz generate + submit |
 | **Progress Route** | `app/api/v1/routes/progress.py` | FastAPI endpoint for marking node done |
 | **Chat Service** | `app/services/chat_service.py` | LLM call, answer storage, grading logic |
-| **Progress Service** | `app/services/progress_service.py` | Node status update, XP award, auto-complete |
+| **Progress Service** | `app/services/progress_service.py` | Node status update, XP award, parent auto-complete |
 | **User Repository** | `app/repositories/user_repository.py` | `add_xp()` — writes to point_transactions |
 | **Database** | PostgreSQL | All persistent data |
 | **AI Model** | Gemini (configurable) | Generates quiz questions |

@@ -38,7 +38,7 @@ export default function Layout({ children }) {
                 </NavLink>
                 {(isAdmin || isManager) && (
                     <NavLink to="/admin" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-                        <Users2 size={16} /> {isManager ? 'Team Overview' : 'Admin'}
+                        <Users2 size={16} /> {isManager ? 'Team Overview' : 'Control Center'}
                     </NavLink>
                 )}
                 <NavLink to="/resume" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
@@ -57,7 +57,12 @@ export default function Layout({ children }) {
 
                 <div className="user-card">
                     <div className="name">{user?.display_name}</div>
-                    <div className="role">Level {user?.level} · {user?.xp_balance} XP</div>
+                    <div className="role">
+                        {isAdmin || isManager
+                            ? <span className="badge badge-primary" style={{ fontSize: 11 }}>{user?.role}</span>
+                            : <>Level {user?.level} · {user?.xp_balance} XP</>
+                        }
+                    </div>
                 </div>
                 <button className="nav-link" onClick={doLogout} style={{ color: 'var(--danger)' }}>
                     <LogOut size={16} /> Logout
