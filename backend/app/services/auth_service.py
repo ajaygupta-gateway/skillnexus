@@ -56,35 +56,36 @@ class AuthService:
         if not user.is_active:
             raise InvalidCredentialsException()
 
-        # Handle streak + XP for login
-        streak_result = await self.user_repo.update_streak(user)
-        
-        # Only award login XP if they haven't already logged in today
-        if not streak_result.get("already_logged_in_today"):
-            from app.models.models import PointEventType
-            from app.core.config import settings
-            await self.user_repo.add_xp(
-                user_id=user.id,
-                user_name=user.display_name,
-                amount=settings.XP_LOGIN,
-                event_type=PointEventType.login,
-                description="Daily login bonus",
-            )
-            # Award streak bonus if applicable
-            if streak_result.get("streak_bonus_awarded"):
+        # Handle streak + XP for login (Learners only)
+        if user.role == UserRole.learner:
+            streak_result = await self.user_repo.update_streak(user)
+            
+            # Only award login XP if they haven't already logged in today
+            if not streak_result.get("already_logged_in_today"):
+                from app.models.models import PointEventType
                 from app.core.config import settings
                 await self.user_repo.add_xp(
                     user_id=user.id,
                     user_name=user.display_name,
-                    amount=settings.XP_STREAK_BONUS,
-                    event_type=PointEventType.streak_bonus,
-                    description=f"Streak bonus! {user.streak_count} day streak",
+                    amount=settings.XP_LOGIN,
+                    event_type=PointEventType.login,
+                    description="Daily login bonus",
                 )
-            
-            # Refresh user to get updated XP for level calculation
-            await self.db.refresh(user)
+                # Award streak bonus if applicable
+                if streak_result.get("streak_bonus_awarded"):
+                    from app.core.config import settings
+                    await self.user_repo.add_xp(
+                        user_id=user.id,
+                        user_name=user.display_name,
+                        amount=settings.XP_STREAK_BONUS,
+                        event_type=PointEventType.streak_bonus,
+                        description=f"Streak bonus! {user.streak_count} day streak",
+                    )
+                
+                # Refresh user to get updated XP for level calculation
+                await self.db.refresh(user)
 
-        await self.user_repo.update_level(user)
+            await self.user_repo.update_level(user)
 
         # Build tokens
         token_data = {"sub": str(user.id), "email": user.email, "role": user.role}
