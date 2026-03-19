@@ -71,39 +71,65 @@ def _extract_text_from_pdf(file_path: str) -> str:
 
 
 def _sanitize_resume_text(text: str) -> str:
-    """Remove personal details (phone numbers and emails) from resume text."""
+    """Remove personal details (phone numbers, emails, personal URLs, addresses) from resume text."""
     import re
 
+    # ── Log the ORIGINAL text (first 500 chars) for comparison ──
+    print("=" * 60)
+    print("BEFORE SANITIZATION (first 500 chars):")
+    print(text[:500])
+    print("=" * 60)
+
     phone_patterns = [
-        r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b",  # 123-456-7890 or 123.456.7890 or 1234567890
-        r"\b\d{1,3}[-.]?\d{3}[-.]?\d{3}[-.]?\d{4}\b",  # international with country code
-        r"\(\d{3}\)\s*\d{3}[-.]?\d{4}",  # (123) 456-7890
+        r"\+?\d{1,3}[-.\s]?\(?\d{2,5}\)?[-.\s]?\d{3,5}[-.\s]?\d{3,5}",  # broad international: +91 98765 43210, +1 (123) 456-7890
+        r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}",  # US: (123) 456-7890, 123-456-7890
+        r"\b\d{5}[-.\s]?\d{5}\b",  # Indian 10-digit with space/dash: 98765 43210
+        r"\b\d{10,13}\b",  # plain 10-13 digit numbers (phone without separators)
     ]
     email_pattern = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
+    # Personal profile URLs — match with OR without https:// prefix
+    url_patterns = [
+        r"(?:https?://)?(?:www\.)?linkedin\.com/in/[^\s,;)]+",
+        r"(?:https?://)?(?:www\.)?github\.com/[^\s,;)]+",
+        r"(?:https?://)?(?:www\.)?twitter\.com/[^\s,;)]+",
+        r"(?:https?://)?(?:www\.)?x\.com/[^\s,;)]+",
+    ]
+    # Address patterns
+    address_patterns = [
+        # "Address:" or "Address :" followed by content until end of line
+        r"(?i)address\s*:\s*[^\n]+",
+        # "Location:" followed by content until end of line
+        r"(?i)location\s*:\s*[^\n]+",
+        # Indian PIN codes (6 digits, often with preceding city/state)
+        r"\b\d{6}\b",
+        # US ZIP codes: 12345 or 12345-6789
+        r"\b\d{5}(?:-\d{4})?\b",
+    ]
 
-    original_length = len(text)
-    
-    # 1. Count before replacing
+    # 1. Count matches before replacing
     phones_found = sum(len(re.findall(p, text)) for p in phone_patterns)
     emails_found = len(re.findall(email_pattern, text))
-    
+    urls_found = sum(len(re.findall(p, text, re.IGNORECASE)) for p in url_patterns)
+    addresses_found = sum(len(re.findall(p, text)) for p in address_patterns)
+
     # 2. Sequential replacement
     sanitized_text = text
     for pattern in phone_patterns:
         sanitized_text = re.sub(pattern, "[PHONE REMOVED]", sanitized_text)
     sanitized_text = re.sub(email_pattern, "[EMAIL REMOVED]", sanitized_text)
+    for pattern in url_patterns:
+        sanitized_text = re.sub(pattern, "[PROFILE URL REMOVED]", sanitized_text, flags=re.IGNORECASE)
+    for pattern in address_patterns:
+        sanitized_text = re.sub(pattern, "[ADDRESS REMOVED]", sanitized_text)
 
-    sanitized_length = len(sanitized_text)
-
-    # 3. Logging
-    logging.info(
-        f"PII Sanitization complete. Phones: {phones_found}, Emails: {emails_found}"
+    # ── Log the SANITIZED text (first 500 chars) for comparison ──
+    print("AFTER SANITIZATION (first 500 chars):")
+    print(sanitized_text[:500])
+    print("=" * 60)
+    print(
+        f"PII Sanitization summary — Phones: {phones_found}, Emails: {emails_found}, "
+        f"URLs: {urls_found}, Addresses: {addresses_found}"
     )
-    
-    if phones_found > 0 or emails_found > 0:
-        logging.info(f"Text length reduced from {original_length} to {sanitized_length} chars.")
-    else:
-        logging.info("No phone numbers or emails detected in resume text.")
 
     return sanitized_text
 
