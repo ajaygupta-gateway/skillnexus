@@ -66,7 +66,11 @@ export default function Roadmaps() {
     const load = () => {
         setLoading(true);
         roadmapApi.list({ published_only: !isAdmin, page_size: 50 })
-            .then(r => setRoadmaps(r.data.items || []))
+            .then(r => {
+                const items = r.data.items || [];
+                setRoadmaps(items);
+                alert(JSON.stringify(items));
+            })
             .catch(() => { })
             .finally(() => setLoading(false));
     };
